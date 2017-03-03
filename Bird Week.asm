@@ -20,6 +20,7 @@
 ; Variables
 			; Zero-page
 			vPPUController equ $06
+			vPPUMask equ $07
 			vCycleCounter equ $09
 			vPlayerInput equ $0a
 			vGameState equ $50
@@ -27,6 +28,13 @@
 			vCurrentLevel equ $55
 			vBirdLives equ $56
 			vMainMemuCounter equ $57
+			vWoodpeckerState equ $58
+			vBirdIsRight equ $5a
+			vBirdX equ $5b
+			vBirdOffsetX equ $5c
+			vBirdDirection equ $5d
+			vFoxX equ $7b
+			vWoodpeckerSquirrelX equ $7e
 			vScoreScreenCounter equ $d4
 			vIsGameLoading equ $f6
 			vGameLoadingCounter equ $f7
@@ -38,9 +46,16 @@
 			vStageSelectOnes equ $02e2
 			vPlayMainMenuMusic equ $0273
 			
+			; 0600 - sprite table
+			vWoodPeckerSprite equ $073d
+			
 ; I/O registers
 			ppuControl equ $2000
+			ppuMask equ $2001
+			ppuStatus equ $2002
+			ppuOAMAddr equ $2003
 			ppuAddress equ $2006
+			OAMDMA equ $4014
 
 ;-------------------------------------------------------------------------------
 ; Program Origin
@@ -148,7 +163,7 @@ __c086:     jsr __c309         ; $c086: 20 09 c3
             jsr __f62d         ; $c089: 20 2d f6  
             jsr __cd35         ; $c08c: 20 35 cd  
             jsr __c1df         ; $c08f: 20 df c1  
-            jsr __fde0         ; $c092: 20 e0 fd  
+            jsr __showSprites         ; $c092: 20 e0 fd  
             lda vGameState            ; $c095: a5 50     
             cmp #$01           ; $c097: c9 01     
             beq __c09d         ; $c099: f0 02     
@@ -496,7 +511,7 @@ __c304:     inc $5e            ; $c304: e6 5e
             jmp __c2fe         ; $c306: 4c fe c2  
 
 ;-------------------------------------------------------------------------------
-__c309:     jsr __PPUIncrementBy32         ; $c309: 20 e4 fe  
+__c309:     jsr __setPPUIncrementBy32         ; $c309: 20 e4 fe  
             jsr __isBonusLevel         ; $c30c: 20 5e c3  
             cpx #$03           ; $c30f: e0 03     
             beq __c31c         ; $c311: f0 09     
@@ -604,7 +619,7 @@ __c3cb:     .hex e3 e7 ef eb   ; $c3cb: e3 e7 ef eb   Data
             .hex f3 f2         ; $c3cf: f3 f2         Data
 
 ;-------------------------------------------------------------------------------
-__c3d1:     jsr __PPUIncrementBy32         ; $c3d1: 20 e4 fe  
+__c3d1:     jsr __setPPUIncrementBy32         ; $c3d1: 20 e4 fe  
             jsr __c404         ; $c3d4: 20 04 c4  
             lda __c41c,x       ; $c3d7: bd 1c c4  
             sta $2007          ; $c3da: 8d 07 20  
@@ -670,9 +685,9 @@ __c454:     lda $ab            ; $c454: a5 ab
             bne __c4a1         ; $c456: d0 49     
             ldx #$00           ; $c458: a2 00     
 __c45a:     lda $70,x          ; $c45a: b5 70     
-            sta $5c            ; $c45c: 85 5c     
+            sta vBirdOffsetX            ; $c45c: 85 5c     
             jsr __d4e5         ; $c45e: 20 e5 d4  
-            lda $5c            ; $c461: a5 5c     
+            lda vBirdOffsetX            ; $c461: a5 5c     
             tay                ; $c463: a8        
             and #$01           ; $c464: 29 01     
             bne __c485         ; $c466: d0 1d     
@@ -1058,21 +1073,21 @@ __c70c:     jsr __c6a2         ; $c70c: 20 a2 c6
             sta $a1            ; $c71a: 85 a1     
             inc $67            ; $c71c: e6 67     
             lda #$a0           ; $c71e: a9 a0     
-            sta $7b            ; $c720: 85 7b     
+            sta vFoxX            ; $c720: 85 7b     
             lda #$a8           ; $c722: a9 a8     
             sta $7c            ; $c724: 85 7c     
             sta $80            ; $c726: 85 80     
             lda #$d8           ; $c728: a9 d8     
             sta $70            ; $c72a: 85 70     
             sta $78            ; $c72c: 85 78     
-            sta $7e            ; $c72e: 85 7e     
+            sta vWoodpeckerSquirrelX            ; $c72e: 85 7e     
             lda #$e0           ; $c730: a9 e0     
             sta $71            ; $c732: 85 71     
             sta $79            ; $c734: 85 79     
             lda #$e8           ; $c736: a9 e8     
             sta $72            ; $c738: 85 72     
             lda #$02           ; $c73a: a9 02     
-            sta $58            ; $c73c: 85 58     
+            sta vWoodpeckerState            ; $c73c: 85 58     
             dec vBirdLives            ; $c73e: c6 56     
             lda vBirdLives            ; $c740: a5 56     
             beq __c74b         ; $c742: f0 07     
@@ -1299,7 +1314,7 @@ __c8bc:     lda #$00           ; $c8bc: a9 00
 ;-------------------------------------------------------------------------------
 __c8c3:     jsr __ca4a         ; $c8c3: 20 4a ca  
             jsr __fdb6         ; $c8c6: 20 b6 fd  
-            jsr __fdd6         ; $c8c9: 20 d6 fd  
+            jsr __hideSprites         ; $c8c9: 20 d6 fd  
             jsr __f6dd         ; $c8cc: 20 dd f6  
             inc $d3            ; $c8cf: e6 d3     
             rts                ; $c8d1: 60        
@@ -1638,7 +1653,7 @@ __cb2b:
             beq __cb2a         ; $cb2f: f0 f9     
             bcs __cb2a         ; $cb31: b0 f7     
 			
-            jsr __PPUIncrementBy32         ; $cb33: 20 e4 fe  
+            jsr __setPPUIncrementBy32         ; $cb33: 20 e4 fe  
             jsr __d716         ; $cb36: 20 16 d7  
             lda #$22           ; $cb39: a9 22     
             sta ppuAddress          ; $cb3b: 8d 06 20  
@@ -1884,7 +1899,7 @@ __cd35:     lda #$00           ; $cd35: a9 00
             sta $20            ; $cd37: 85 20     
             sta $84            ; $cd39: 85 84     
             sta $85            ; $cd3b: 85 85     
-            sta $58            ; $cd3d: 85 58     
+            sta vWoodpeckerState            ; $cd3d: 85 58     
             sta $59            ; $cd3f: 85 59     
             lda #$02           ; $cd41: a9 02     
             sta $0775          ; $cd43: 8d 75 07  
@@ -1971,7 +1986,7 @@ __cdba:     lda vCurrentLevel            ; $cdba: a5 55
             sta $70            ; $ce08: 85 70     
             jsr __isBonusLevel         ; $ce0a: 20 5e c3  
             lda __ce15,x       ; $ce0d: bd 15 ce  
-            sta $7e            ; $ce10: 85 7e     
+            sta vWoodpeckerSquirrelX            ; $ce10: 85 7e     
             jmp __ce19         ; $ce12: 4c 19 ce  
 
 ;-------------------------------------------------------------------------------
@@ -2034,7 +2049,7 @@ __ce81:     lda #$b0           ; $ce81: a9 b0
             lda #$01           ; $ce8a: a9 01     
             sta $0261          ; $ce8c: 8d 61 02  
             lda #$02           ; $ce8f: a9 02     
-            sta $58            ; $ce91: 85 58     
+            sta vWoodpeckerState            ; $ce91: 85 58     
             rts                ; $ce93: 60        
 
 ;-------------------------------------------------------------------------------
@@ -2095,20 +2110,20 @@ __cf44:     .hex f0 f0 f0 f0   ; $cf44: f0 f0 f0 f0   Data
 ;-------------------------------------------------------------------------------
 __cf54:     ldy #$01           ; $cf54: a0 01     
             lda #$3c           ; $cf56: a9 3c     
-            sta $5c            ; $cf58: 85 5c     
+            sta vBirdOffsetX            ; $cf58: 85 5c     
             jsr __d186         ; $cf5a: 20 86 d1  
             jsr __cfee         ; $cf5d: 20 ee cf  
             beq __cfa2         ; $cf60: f0 40     
             cmp #$07           ; $cf62: c9 07     
             beq __cfa2         ; $cf64: f0 3c     
-            lda $5c            ; $cf66: a5 5c     
+            lda vBirdOffsetX            ; $cf66: a5 5c     
             and #$01           ; $cf68: 29 01     
             bne __cfa2         ; $cf6a: d0 36     
             jsr __isBonusLevel         ; $cf6c: 20 5e c3  
             lda vCurrentLevel            ; $cf6f: a5 55     
             cmp #$10           ; $cf71: c9 10     
             bcs __cfbe         ; $cf73: b0 49     
-__cf75:     lda $5c            ; $cf75: a5 5c     
+__cf75:     lda vBirdOffsetX            ; $cf75: a5 5c     
             cmp __d1de,x       ; $cf77: dd de d1  
             bcc __cf8e         ; $cf7a: 90 12     
             cmp __d1e6,x       ; $cf7c: dd e6 d1  
@@ -2118,7 +2133,7 @@ __cf75:     lda $5c            ; $cf75: a5 5c
             bcc __cf8e         ; $cf87: 90 05     
             cmp __d1f6,x       ; $cf89: dd f6 d1  
             bcc __cfe5         ; $cf8c: 90 57     
-__cf8e:     lda $5c            ; $cf8e: a5 5c     
+__cf8e:     lda vBirdOffsetX            ; $cf8e: a5 5c     
             cmp __d1fe,x       ; $cf90: dd fe d1  
             bcc __cfa2         ; $cf93: 90 0d     
             cmp __d206,x       ; $cf95: dd 06 d2  
@@ -2202,7 +2217,7 @@ __d00d:     jsr __cfee         ; $d00d: 20 ee cf
 __d019:     lda vCycleCounter            ; $d019: a5 09     
             and #$07           ; $d01b: 29 07     
             beq __d033         ; $d01d: f0 14     
-            lda $5d            ; $d01f: a5 5d     
+            lda vBirdDirection            ; $d01f: a5 5d     
             beq __d05a         ; $d021: f0 37     
             cmp #$01           ; $d023: c9 01     
             beq __d053         ; $d025: f0 2c     
@@ -2213,20 +2228,20 @@ __d019:     lda vCycleCounter            ; $d019: a5 09
             cmp #$04           ; $d02f: c9 04     
             beq __d04d         ; $d031: f0 1a     
 __d033:     lda #$00           ; $d033: a9 00     
-            sta $5d            ; $d035: 85 5d     
+            sta vBirdDirection            ; $d035: 85 5d     
             lda vPlayerInput            ; $d037: a5 0a     
             asl                ; $d039: 0a        
             bcs __d05a         ; $d03a: b0 1e     
-            inc $5d            ; $d03c: e6 5d     
+            inc vBirdDirection            ; $d03c: e6 5d     
             asl                ; $d03e: 0a        
             bcs __d053         ; $d03f: b0 12     
-            inc $5d            ; $d041: e6 5d     
+            inc vBirdDirection            ; $d041: e6 5d     
             asl                ; $d043: 0a        
             bcs __d050         ; $d044: b0 0a     
-            inc $5d            ; $d046: e6 5d     
+            inc vBirdDirection            ; $d046: e6 5d     
             asl                ; $d048: 0a        
             bcs __d061         ; $d049: b0 16     
-            inc $5d            ; $d04b: e6 5d     
+            inc vBirdDirection            ; $d04b: e6 5d     
 __d04d:     jmp __d136         ; $d04d: 4c 36 d1  
 
 ;-------------------------------------------------------------------------------
@@ -2234,12 +2249,12 @@ __d050:     jmp __d09b         ; $d050: 4c 9b d0
 
 ;-------------------------------------------------------------------------------
 __d053:     lda #$00           ; $d053: a9 00     
-            sta $5a            ; $d055: 85 5a     
+            sta vBirdIsRight            ; $d055: 85 5a     
             jmp __d0f4         ; $d057: 4c f4 d0  
 
 ;-------------------------------------------------------------------------------
 __d05a:     lda #$01           ; $d05a: a9 01     
-            sta $5a            ; $d05c: 85 5a     
+            sta vBirdIsRight            ; $d05c: 85 5a     
             jmp __d118         ; $d05e: 4c 18 d1  
 
 ;-------------------------------------------------------------------------------
@@ -2247,13 +2262,13 @@ __d061:     lda $60            ; $d061: a5 60
             bne __d068         ; $d063: d0 03     
             dec $0700          ; $d065: ce 00 07  
 __d068:     jsr __d08b         ; $d068: 20 8b d0  
-            lda $5a            ; $d06b: a5 5a     
+            lda vBirdIsRight            ; $d06b: a5 5a     
             bne __d072         ; $d06d: d0 03     
             jsr __c83f         ; $d06f: 20 3f c8  
 __d072:     jsr __d084         ; $d072: 20 84 d0  
             jsr __d658         ; $d075: 20 58 d6  
             bne __d08a         ; $d078: d0 10     
-            lda $5a            ; $d07a: a5 5a     
+            lda vBirdIsRight            ; $d07a: a5 5a     
             bne __d081         ; $d07c: d0 03     
             jmp __d17b         ; $d07e: 4c 7b d1  
 
@@ -2291,11 +2306,11 @@ __d09b:     lda $61            ; $d09b: a5 61
             clc                ; $d0ad: 18        
             adc #$08           ; $d0ae: 69 08     
             tax                ; $d0b0: aa        
-            lda $5a            ; $d0b1: a5 5a     
+            lda vBirdIsRight            ; $d0b1: a5 5a     
             bne __d0b8         ; $d0b3: d0 03     
             jsr __c83f         ; $d0b5: 20 3f c8  
 __d0b8:     jsr __d084         ; $d0b8: 20 84 d0  
-__d0bb:     lda $5a            ; $d0bb: a5 5a     
+__d0bb:     lda vBirdIsRight            ; $d0bb: a5 5a     
             bne __d0c2         ; $d0bd: d0 03     
             jmp __d17b         ; $d0bf: 4c 7b d1  
 
@@ -2303,7 +2318,7 @@ __d0bb:     lda $5a            ; $d0bb: a5 5a
 __d0c2:     jmp __d16e         ; $d0c2: 4c 6e d1  
 
 ;-------------------------------------------------------------------------------
-__d0c5:     lda $5a            ; $d0c5: a5 5a     
+__d0c5:     lda vBirdIsRight            ; $d0c5: a5 5a     
             bne __d0ce         ; $d0c7: d0 05     
             ldx #$11           ; $d0c9: a2 11     
             jmp __d084         ; $d0cb: 4c 84 d0  
@@ -2321,7 +2336,7 @@ __d0db:     jsr __d093         ; $d0db: 20 93 d0
             clc                ; $d0df: 18        
             adc #$08           ; $d0e0: 69 08     
             tax                ; $d0e2: aa        
-            lda $5a            ; $d0e3: a5 5a     
+            lda vBirdIsRight            ; $d0e3: a5 5a     
             bne __d0ea         ; $d0e5: d0 03     
             jsr __c83f         ; $d0e7: 20 3f c8  
 __d0ea:     jsr __d084         ; $d0ea: 20 84 d0  
@@ -2374,14 +2389,14 @@ __d136:     lda $61            ; $d136: a5 61
             lda $62            ; $d13a: a5 62     
             bne __d16b         ; $d13c: d0 2d     
             jsr __d08b         ; $d13e: 20 8b d0  
-            lda $5a            ; $d141: a5 5a     
+            lda vBirdIsRight            ; $d141: a5 5a     
             bne __d148         ; $d143: d0 03     
             jsr __c83f         ; $d145: 20 3f c8  
 __d148:     jsr __d084         ; $d148: 20 84 d0  
             jsr __d658         ; $d14b: 20 58 d6  
             bne __d153         ; $d14e: d0 03     
             inc $0700          ; $d150: ee 00 07  
-__d153:     lda $5a            ; $d153: a5 5a     
+__d153:     lda vBirdIsRight            ; $d153: a5 5a     
             bne __d15a         ; $d155: d0 03     
             jmp __d17b         ; $d157: 4c 7b d1  
 
@@ -2389,7 +2404,7 @@ __d153:     lda $5a            ; $d153: a5 5a
 __d15a:     jmp __d16e         ; $d15a: 4c 6e d1  
 
 ;-------------------------------------------------------------------------------
-__d15d:     lda $5a            ; $d15d: a5 5a     
+__d15d:     lda vBirdIsRight            ; $d15d: a5 5a     
             bne __d166         ; $d15f: d0 05     
             ldx #$11           ; $d161: a2 11     
 __d163:     jmp __d084         ; $d163: 4c 84 d0  
@@ -2419,14 +2434,14 @@ __d181:     dec $03            ; $d181: c6 03
 
 ;-------------------------------------------------------------------------------
 __d186:     jsr __d4fc         ; $d186: 20 fc d4  
-            sta $5b            ; $d189: 85 5b     
-            lda $5c            ; $d18b: a5 5c     
+            sta vBirdX            ; $d189: 85 5b     
+            lda vBirdOffsetX            ; $d18b: a5 5c     
             clc                ; $d18d: 18        
-            adc $5b            ; $d18e: 65 5b     
+            adc vBirdX            ; $d18e: 65 5b     
             cmp #$7c           ; $d190: c9 7c     
             bcs __d198         ; $d192: b0 04     
             asl                ; $d194: 0a        
-__d195:     sta $5c            ; $d195: 85 5c     
+__d195:     sta vBirdOffsetX            ; $d195: 85 5c     
             rts                ; $d197: 60        
 
 ;-------------------------------------------------------------------------------
@@ -2439,7 +2454,7 @@ __d19d:     inc $0227          ; $d19d: ee 27 02
             and #$7f           ; $d1a3: 29 7f     
             beq __d1bb         ; $d1a5: f0 14     
             jsr __d093         ; $d1a7: 20 93 d0  
-            lda $5a            ; $d1aa: a5 5a     
+            lda vBirdIsRight            ; $d1aa: a5 5a     
             beq __d1b5         ; $d1ac: f0 07     
 __d1ae:     lda __d1d6,x       ; $d1ae: bd d6 d1  
             sta $0701          ; $d1b1: 8d 01 07  
@@ -2637,28 +2652,28 @@ __d3eb:     .hex 00 00 00 40   ; $d3eb: 00 00 00 40   Data
 ;-------------------------------------------------------------------------------
 __d48a:     jsr __d716         ; $d48a: 20 16 d7  
 __d48d:     lda $70,x          ; $d48d: b5 70     
-            sta $5c            ; $d48f: 85 5c     
+            sta vBirdOffsetX            ; $d48f: 85 5c     
             jsr __d4e5         ; $d491: 20 e5 d4  
-            lda $5c            ; $d494: a5 5c     
+            lda vBirdOffsetX            ; $d494: a5 5c     
             and #$01           ; $d496: 29 01     
             bne __d4cc         ; $d498: d0 32     
             lda $03            ; $d49a: a5 03     
             and #$01           ; $d49c: 29 01     
             bne __d4a8         ; $d49e: d0 08     
-            lda $5c            ; $d4a0: a5 5c     
+            lda vBirdOffsetX            ; $d4a0: a5 5c     
             clc                ; $d4a2: 18        
             adc #$01           ; $d4a3: 69 01     
             jmp __d4aa         ; $d4a5: 4c aa d4  
 
 ;-------------------------------------------------------------------------------
-__d4a8:     lda $5c            ; $d4a8: a5 5c     
+__d4a8:     lda vBirdOffsetX            ; $d4a8: a5 5c     
 __d4aa:     sta $0707,y        ; $d4aa: 99 07 07  
             lda $90,x          ; $d4ad: b5 90     
             cmp #$18           ; $d4af: c9 18     
             beq __d4d1         ; $d4b1: f0 1e     
             cmp #$d8           ; $d4b3: c9 d8     
             beq __d4d1         ; $d4b5: f0 1a     
-            lda $5c            ; $d4b7: a5 5c     
+            lda vBirdOffsetX            ; $d4b7: a5 5c     
             and #$01           ; $d4b9: 29 01     
             bne __d4e0         ; $d4bb: d0 23     
             lda $90,x          ; $d4bd: b5 90     
@@ -2691,14 +2706,14 @@ __d4e0:     lda #$f0           ; $d4e0: a9 f0
 
 ;-------------------------------------------------------------------------------
 __d4e5:     jsr __d4fc         ; $d4e5: 20 fc d4  
-            sta $5b            ; $d4e8: 85 5b     
-            lda $5c            ; $d4ea: a5 5c     
+            sta vBirdX            ; $d4e8: 85 5b     
+            lda vBirdOffsetX            ; $d4ea: a5 5c     
             sec                ; $d4ec: 38        
-            sbc $5b            ; $d4ed: e5 5b     
+            sbc vBirdX            ; $d4ed: e5 5b     
             cmp #$7c           ; $d4ef: c9 7c     
             bcs __d4f7         ; $d4f1: b0 04     
             asl                ; $d4f3: 0a        
-__d4f4:     sta $5c            ; $d4f4: 85 5c     
+__d4f4:     sta vBirdOffsetX            ; $d4f4: 85 5c     
             rts                ; $d4f6: 60        
 
 ;-------------------------------------------------------------------------------
@@ -2765,9 +2780,9 @@ __d540:     lda $68            ; $d540: a5 68
 __d55b:     dec $98            ; $d55b: c6 98     
             dec $99            ; $d55d: c6 99     
 __d55f:     lda $78            ; $d55f: a5 78     
-            sta $5b            ; $d561: 85 5b     
+            sta vBirdX            ; $d561: 85 5b     
             jsr __d5fc         ; $d563: 20 fc d5  
-            lda $5b            ; $d566: a5 5b     
+            lda vBirdX            ; $d566: a5 5b     
             beq __d5a8         ; $d568: f0 3e     
             cmp #$01           ; $d56a: c9 01     
             beq __d58e         ; $d56c: f0 20     
@@ -2848,11 +2863,11 @@ __d5fc:     jsr __d4fc         ; $d5fc: 20 fc d4
             clc                ; $d5ff: 18        
             adc #$3c           ; $d600: 69 3c     
             sec                ; $d602: 38        
-            sbc $5b            ; $d603: e5 5b     
+            sbc vBirdX            ; $d603: e5 5b     
             beq __d60e         ; $d605: f0 07     
             bpl __d613         ; $d607: 10 0a     
             lda #$01           ; $d609: a9 01     
-__d60b:     sta $5b            ; $d60b: 85 5b     
+__d60b:     sta vBirdX            ; $d60b: 85 5b     
             rts                ; $d60d: 60        
 
 ;-------------------------------------------------------------------------------
@@ -3031,7 +3046,7 @@ __d721:     lda $0295          ; $d721: ad 95 02
 __d73f:     jmp __d835         ; $d73f: 4c 35 d8  
 
 ;-------------------------------------------------------------------------------
-__d742:     jsr __fde0         ; $d742: 20 e0 fd  
+__d742:     jsr __showSprites         ; $d742: 20 e0 fd  
             lda #$13           ; $d745: a9 13     
             sta $20            ; $d747: 85 20     
             inc $0295          ; $d749: ee 95 02  
@@ -3100,7 +3115,7 @@ __d7c2:     rts                ; $d7c2: 60
 __d7c3:     .hex 32 33 34 35   ; $d7c3: 32 33 34 35   Data
             .hex 36 37 38 39   ; $d7c7: 36 37 38 39   Data
             .hex 3a            ; $d7cb: 3a            Data
-__d7cc:     jsr __PPUIncrementBy32         ; $d7cc: 20 e4 fe  
+__d7cc:     jsr __setPPUIncrementBy32         ; $d7cc: 20 e4 fe  
             lda $02c2          ; $d7cf: ad c2 02  
             cmp #$20           ; $d7d2: c9 20     
             beq __d812         ; $d7d4: f0 3c     
@@ -3302,16 +3317,16 @@ __d934:     lda $ea            ; $d934: a5 ea
             lda #$01           ; $d938: a9 01     
             sta $2a            ; $d93a: 85 2a     
             sta $ea            ; $d93c: 85 ea     
-            stx $5c            ; $d93e: 86 5c     
+            stx vBirdOffsetX            ; $d93e: 86 5c     
             jsr __fefa         ; $d940: 20 fa fe  
-            ldx $5c            ; $d943: a6 5c     
+            ldx vBirdOffsetX            ; $d943: a6 5c     
 __d945:     jsr __d4fc         ; $d945: 20 fc d4  
             clc                ; $d948: 18        
             adc #$3c           ; $d949: 69 3c     
-            sta $5c            ; $d94b: 85 5c     
-            lda $5a            ; $d94d: a5 5a     
+            sta vBirdOffsetX            ; $d94b: 85 5c     
+            lda vBirdIsRight            ; $d94d: a5 5a     
             bne __d960         ; $d94f: d0 0f     
-            lda $5c            ; $d951: a5 5c     
+            lda vBirdOffsetX            ; $d951: a5 5c     
             sec                ; $d953: 38        
             sbc #$04           ; $d954: e9 04     
 __d956:     sta $73,x          ; $d956: 95 73     
@@ -3321,7 +3336,7 @@ __d956:     sta $73,x          ; $d956: 95 73
             jmp __d9a4         ; $d95d: 4c a4 d9  
 
 ;-------------------------------------------------------------------------------
-__d960:     lda $5c            ; $d960: a5 5c     
+__d960:     lda vBirdOffsetX            ; $d960: a5 5c     
             clc                ; $d962: 18        
             adc #$04           ; $d963: 69 04     
             jmp __d956         ; $d965: 4c 56 d9  
@@ -3395,17 +3410,17 @@ __d9de:     lda $0207          ; $d9de: ad 07 02
             jmp __d97d         ; $d9f3: 4c 7d d9  
 
 ;-------------------------------------------------------------------------------
-__d9f6:     stx $5c            ; $d9f6: 86 5c     
+__d9f6:     stx vBirdOffsetX            ; $d9f6: 86 5c     
             ldx #$00           ; $d9f8: a2 00     
             jmp __da08         ; $d9fa: 4c 08 da  
 
 ;-------------------------------------------------------------------------------
-__d9fd:     stx $5c            ; $d9fd: 86 5c     
+__d9fd:     stx vBirdOffsetX            ; $d9fd: 86 5c     
             ldx #$01           ; $d9ff: a2 01     
             jmp __da08         ; $da01: 4c 08 da  
 
 ;-------------------------------------------------------------------------------
-__da04:     stx $5c            ; $da04: 86 5c     
+__da04:     stx vBirdOffsetX            ; $da04: 86 5c     
             ldx #$02           ; $da06: a2 02     
 __da08:     lda $0205,x        ; $da08: bd 05 02  
             cmp #$a0           ; $da0b: c9 a0     
@@ -3415,13 +3430,13 @@ __da08:     lda $0205,x        ; $da08: bd 05 02
             cmp #$f0           ; $da13: c9 f0     
             bcc __da1d         ; $da15: 90 06     
             inc $022b          ; $da17: ee 2b 02  
-            ldx $5c            ; $da1a: a6 5c     
+            ldx vBirdOffsetX            ; $da1a: a6 5c     
             rts                ; $da1c: 60        
 
 ;-------------------------------------------------------------------------------
 __da1d:     inc $022a          ; $da1d: ee 2a 02  
 __da20:     jsr __fefa         ; $da20: 20 fa fe  
-            ldx $5c            ; $da23: a6 5c     
+            ldx vBirdOffsetX            ; $da23: a6 5c     
 __da25:     rts                ; $da25: 60        
 
 ;-------------------------------------------------------------------------------
@@ -3783,7 +3798,7 @@ __dd04:     tya                ; $dd04: 98
             and #$01           ; $dd05: 29 01     
             bne __dd28         ; $dd07: d0 1f     
             lda #$7b           ; $dd09: a9 7b     
-            sta $073d          ; $dd0b: 8d 3d 07  
+            sta vWoodPeckerSprite          ; $dd0b: 8d 3d 07  
             lda $9e            ; $dd0e: a5 9e     
             cmp #$b0           ; $dd10: c9 b0     
             bcs __dd3a         ; $dd12: b0 26     
@@ -3803,7 +3818,7 @@ __dd28:     tya                ; $dd28: 98
             and #$08           ; $dd29: 29 08     
             bne __dd35         ; $dd2b: d0 08     
             lda #$79           ; $dd2d: a9 79     
-__dd2f:     sta $073d          ; $dd2f: 8d 3d 07  
+__dd2f:     sta vWoodPeckerSprite          ; $dd2f: 8d 3d 07  
             jmp __dd4b         ; $dd32: 4c 4b dd  
 
 ;-------------------------------------------------------------------------------
@@ -3821,7 +3836,7 @@ __dd3a:     lda $bf            ; $dd3a: a5 bf
             rts                ; $dd4a: 60        
 
 ;-------------------------------------------------------------------------------
-__dd4b:     lda $7e            ; $dd4b: a5 7e     
+__dd4b:     lda vWoodpeckerSquirrelX            ; $dd4b: a5 7e     
             and #$1f           ; $dd4d: 29 1f     
             cmp #$18           ; $dd4f: c9 18     
             beq __dd65         ; $dd51: f0 12     
@@ -3831,11 +3846,11 @@ __dd4b:     lda $7e            ; $dd4b: a5 7e
 __dd5a:     tya                ; $dd5a: 98        
             and #$08           ; $dd5b: 29 08     
             bne __dd62         ; $dd5d: d0 03     
-            dec $7e            ; $dd5f: c6 7e     
+            dec vWoodpeckerSquirrelX            ; $dd5f: c6 7e     
             rts                ; $dd61: 60        
 
 ;-------------------------------------------------------------------------------
-__dd62:     inc $7e            ; $dd62: e6 7e     
+__dd62:     inc vWoodpeckerSquirrelX            ; $dd62: e6 7e     
             rts                ; $dd64: 60        
 
 ;-------------------------------------------------------------------------------
@@ -3865,18 +3880,18 @@ __dd79:     jsr __d65d         ; $dd79: 20 5d d6
 __dd91:     tya                ; $dd91: 98        
             ora #$01           ; $dd92: 09 01     
             sta $0261          ; $dd94: 8d 61 02  
-            lda $7e            ; $dd97: a5 7e     
-            sta $5b            ; $dd99: 85 5b     
+            lda vWoodpeckerSquirrelX            ; $dd97: a5 7e     
+            sta vBirdX            ; $dd99: 85 5b     
             jsr __d5fc         ; $dd9b: 20 fc d5  
-            lda $5b            ; $dd9e: a5 5b     
+            lda vBirdX            ; $dd9e: a5 5b     
             cmp #$01           ; $dda0: c9 01     
             bne __ddb4         ; $dda2: d0 10     
             lda $0261          ; $dda4: ad 61 02  
             ora #$f7           ; $dda7: 09 f7     
             sta $0261          ; $dda9: 8d 61 02  
             lda #$77           ; $ddac: a9 77     
-            sta $073d          ; $ddae: 8d 3d 07  
-            dec $7e            ; $ddb1: c6 7e     
+            sta vWoodPeckerSprite          ; $ddae: 8d 3d 07  
+            dec vWoodpeckerSquirrelX            ; $ddb1: c6 7e     
 __ddb3:     rts                ; $ddb3: 60        
 
 ;-------------------------------------------------------------------------------
@@ -3884,21 +3899,21 @@ __ddb4:     lda $0261          ; $ddb4: ad 61 02
             ora #$08           ; $ddb7: 09 08     
             sta $0261          ; $ddb9: 8d 61 02  
             lda #$76           ; $ddbc: a9 76     
-            sta $073d          ; $ddbe: 8d 3d 07  
-            inc $7e            ; $ddc1: e6 7e     
+            sta vWoodPeckerSprite          ; $ddbe: 8d 3d 07  
+            inc vWoodpeckerSquirrelX            ; $ddc1: e6 7e     
             rts                ; $ddc3: 60        
 
 ;-------------------------------------------------------------------------------
 __ddc4:     jsr __d08b         ; $ddc4: 20 8b d0  
             lda __dddc,x       ; $ddc7: bd dc dd  
-            sta $073d          ; $ddca: 8d 3d 07  
+            sta vWoodPeckerSprite          ; $ddca: 8d 3d 07  
             inc $9e            ; $ddcd: e6 9e     
             rts                ; $ddcf: 60        
 
 ;-------------------------------------------------------------------------------
 __ddd0:     jsr __d08b         ; $ddd0: 20 8b d0  
             lda __dddc,x       ; $ddd3: bd dc dd  
-            sta $073d          ; $ddd6: 8d 3d 07  
+            sta vWoodPeckerSprite          ; $ddd6: 8d 3d 07  
             dec $9e            ; $ddd9: c6 9e     
             rts                ; $dddb: 60        
 
@@ -3962,8 +3977,8 @@ __de3d:     rts                ; $de3d: 60
 __de3e:     lda $08            ; $de3e: a5 08     
             and #$03           ; $de40: 29 03     
             beq __de59         ; $de42: f0 15     
-            lda $7b            ; $de44: a5 7b     
-            sta $5b            ; $de46: 85 5b     
+            lda vFoxX            ; $de44: a5 7b     
+            sta vBirdX            ; $de46: 85 5b     
             jsr __d5fc         ; $de48: 20 fc d5  
             cmp #$01           ; $de4b: c9 01     
             beq __de54         ; $de4d: f0 05     
@@ -3975,8 +3990,8 @@ __de54:     lda #$10           ; $de54: a9 10
             jmp __de66         ; $de56: 4c 66 de  
 
 ;-------------------------------------------------------------------------------
-__de59:     lda $7b            ; $de59: a5 7b     
-            sta $5b            ; $de5b: 85 5b     
+__de59:     lda vFoxX            ; $de59: a5 7b     
+            sta vBirdX            ; $de5b: 85 5b     
             jsr __d5fc         ; $de5d: 20 fc d5  
             cmp #$01           ; $de60: c9 01     
             beq __de73         ; $de62: f0 0f     
@@ -4083,9 +4098,9 @@ __df4f:     dec $90            ; $df4f: c6 90
 
 ;-------------------------------------------------------------------------------
 __df52:     lda $70            ; $df52: a5 70     
-            sta $5b            ; $df54: 85 5b     
+            sta vBirdX            ; $df54: 85 5b     
             jsr __d5fc         ; $df56: 20 fc d5  
-            lda $5b            ; $df59: a5 5b     
+            lda vBirdX            ; $df59: a5 5b     
             beq __df68         ; $df5b: f0 0b     
             cmp #$01           ; $df5d: c9 01     
             beq __df69         ; $df5f: f0 08     
@@ -5608,7 +5623,7 @@ __f005:     lda vCurrentLevel            ; $f005: a5 55
             lda #$00           ; $f036: a9 00     
             sta $c6            ; $f038: 85 c6     
             lda $80            ; $f03a: a5 80     
-            sta $5b            ; $f03c: 85 5b     
+            sta vBirdX            ; $f03c: 85 5b     
             jsr __d5fc         ; $f03e: 20 fc d5  
             cmp #$01           ; $f041: c9 01     
             beq __f047         ; $f043: f0 02     
@@ -5941,7 +5956,7 @@ __f29e:     inc $59            ; $f29e: e6 59
             cmp #$ff           ; $f2a2: c9 ff     
             beq __f2b5         ; $f2a4: f0 0f     
             lda #$2e           ; $f2a6: a9 2e     
-__f2a8:     sta $073d          ; $f2a8: 8d 3d 07  
+__f2a8:     sta vWoodPeckerSprite          ; $f2a8: 8d 3d 07  
 __f2ab:     rts                ; $f2ab: 60        
 
 ;-------------------------------------------------------------------------------
@@ -5958,13 +5973,13 @@ __f2b5:     lda #$00           ; $f2b5: a9 00
             rts                ; $f2c0: 60        
 
 ;-------------------------------------------------------------------------------
-__f2c1:     lda $58            ; $f2c1: a5 58     
+__f2c1:     lda vWoodpeckerState            ; $f2c1: a5 58     
             and #$02           ; $f2c3: 29 02     
             bne __f307         ; $f2c5: d0 40     
             lda vCycleCounter            ; $f2c7: a5 09     
             and #$40           ; $f2c9: 29 40     
             bne __f2e5         ; $f2cb: d0 18     
-            lda $58            ; $f2cd: a5 58     
+            lda vWoodpeckerState            ; $f2cd: a5 58     
             and #$01           ; $f2cf: 29 01     
             bne __f2dc         ; $f2d1: d0 09     
 __f2d3:     jsr __d093         ; $f2d3: 20 93 d0  
@@ -5978,7 +5993,7 @@ __f2df:     lda __f38f,x       ; $f2df: bd 8f f3
 
 ;-------------------------------------------------------------------------------
 __f2e5:     ldx #$00           ; $f2e5: a2 00     
-            lda $58            ; $f2e7: a5 58     
+            lda vWoodpeckerState            ; $f2e7: a5 58     
             and #$01           ; $f2e9: 29 01     
             beq __f2d6         ; $f2eb: f0 e9     
             bne __f2df         ; $f2ed: d0 f0     
@@ -5993,30 +6008,30 @@ __f2ef:     lda $9e            ; $f2ef: a5 9e
 __f2ff:     rts                ; $f2ff: 60        
 
 ;-------------------------------------------------------------------------------
-__f300:     lda $58            ; $f300: a5 58     
+__f300:     lda vWoodpeckerState            ; $f300: a5 58     
             and #$03           ; $f302: 29 03     
-            sta $58            ; $f304: 85 58     
+            sta vWoodpeckerState            ; $f304: 85 58     
             rts                ; $f306: 60        
 
 ;-------------------------------------------------------------------------------
 __f307:     jsr __f368         ; $f307: 20 68 f3  
-            lda $58            ; $f30a: a5 58     
+            lda vWoodpeckerState            ; $f30a: a5 58     
             and #$01           ; $f30c: 29 01     
             bne __f336         ; $f30e: d0 26     
-            inc $7e            ; $f310: e6 7e     
+            inc vWoodpeckerSquirrelX            ; $f310: e6 7e     
             lda vCurrentLevel            ; $f312: a5 55     
             and #$03           ; $f314: 29 03     
             cmp #$01           ; $f316: c9 01     
             beq __f327         ; $f318: f0 0d     
-            lda $7e            ; $f31a: a5 7e     
+            lda vWoodpeckerSquirrelX            ; $f31a: a5 7e     
             cmp #$31           ; $f31c: c9 31     
             bne __f32d         ; $f31e: d0 0d     
 __f320:     lda #$01           ; $f320: a9 01     
-            sta $58            ; $f322: 85 58     
+            sta vWoodpeckerState            ; $f322: 85 58     
             jmp __f2dc         ; $f324: 4c dc f2  
 
 ;-------------------------------------------------------------------------------
-__f327:     lda $7e            ; $f327: a5 7e     
+__f327:     lda vWoodpeckerSquirrelX            ; $f327: a5 7e     
             cmp #$51           ; $f329: c9 51     
             beq __f320         ; $f32b: f0 f3     
 __f32d:     jsr __d08b         ; $f32d: 20 8b d0  
@@ -6024,20 +6039,20 @@ __f32d:     jsr __d08b         ; $f32d: 20 8b d0
             jmp __f2a8         ; $f333: 4c a8 f2  
 
 ;-------------------------------------------------------------------------------
-__f336:     dec $7e            ; $f336: c6 7e     
+__f336:     dec vWoodpeckerSquirrelX            ; $f336: c6 7e     
             lda vCurrentLevel            ; $f338: a5 55     
             and #$03           ; $f33a: 29 03     
             cmp #$01           ; $f33c: c9 01     
             beq __f34d         ; $f33e: f0 0d     
-            lda $7e            ; $f340: a5 7e     
+            lda vWoodpeckerSquirrelX            ; $f340: a5 7e     
             cmp #$3d           ; $f342: c9 3d     
             bne __f353         ; $f344: d0 0d     
 __f346:     lda #$00           ; $f346: a9 00     
-            sta $58            ; $f348: 85 58     
+            sta vWoodpeckerState            ; $f348: 85 58     
             jmp __f2d3         ; $f34a: 4c d3 f2  
 
 ;-------------------------------------------------------------------------------
-__f34d:     lda $7e            ; $f34d: a5 7e     
+__f34d:     lda vWoodpeckerSquirrelX            ; $f34d: a5 7e     
             cmp #$5d           ; $f34f: c9 5d     
             beq __f346         ; $f351: f0 f3     
 __f353:     jsr __d08b         ; $f353: 20 8b d0  
@@ -6049,7 +6064,7 @@ __f35c:     lda $17            ; $f35c: a5 17
             bne __f383         ; $f35e: d0 23     
             lda vCycleCounter            ; $f360: a5 09     
             cmp #$80           ; $f362: c9 80     
-            bcc __f384         ; $f364: 90 1e     
+            bcc __setWoodpeckerFlyAway         ; $f364: 90 1e     
             bcs __f383         ; $f366: b0 1b     
 __f368:     jsr __d65d         ; $f368: 20 5d d6  
             bne __f383         ; $f36b: d0 16     
@@ -6069,9 +6084,10 @@ __f37b:     lda $9e            ; $f37b: a5 9e
 __f383:     rts                ; $f383: 60        
 
 ;-------------------------------------------------------------------------------
-__f384:     lda $58            ; $f384: a5 58     
+__setWoodpeckerFlyAway:     
+			lda vWoodpeckerState            ; $f384: a5 58     
             ora #$02           ; $f386: 09 02     
-            sta $58            ; $f388: 85 58     
+            sta vWoodpeckerState            ; $f388: 85 58     
             rts                ; $f38a: 60        
 
 ;-------------------------------------------------------------------------------
@@ -6128,7 +6144,7 @@ __f3dd:     lda $0292          ; $f3dd: ad 92 02
             bcc __f407         ; $f3f3: 90 12     
             inc $91            ; $f3f5: e6 91     
 __f3f7:     lda $71            ; $f3f7: a5 71     
-            sta $5b            ; $f3f9: 85 5b     
+            sta vBirdX            ; $f3f9: 85 5b     
             jsr __d5fc         ; $f3fb: 20 fc d5  
             cmp #$01           ; $f3fe: c9 01     
             beq __f40c         ; $f400: f0 0a     
@@ -6380,7 +6396,7 @@ __f5c5:     lda __c000,x       ; $f5c5: bd 00 c0
             jsr __fdf5         ; $f5d4: 20 f5 fd  
             jsr __fdb6         ; $f5d7: 20 b6 fd  
             jsr __e25a         ; $f5da: 20 5a e2  
-            jsr __fde0         ; $f5dd: 20 e0 fd  
+            jsr __showSprites         ; $f5dd: 20 e0 fd  
             lda #$f0           ; $f5e0: a9 f0     
             sta $0760          ; $f5e2: 8d 60 07  
             jmp __c122         ; $f5e5: 4c 22 c1  
@@ -6398,7 +6414,7 @@ __f5e8:     lda vCurrentLevel            ; $f5e8: a5 55
 __f5fd:     nop                ; $f5fd: ea        
             dex                ; $f5fe: ca        
             bne __f5fd         ; $f5ff: d0 fc     
-__f601:     lda $2002          ; $f601: ad 02 20  
+__f601:     lda ppuStatus          ; $f601: ad 02 20  
             and #$40           ; $f604: 29 40     
             beq __f601         ; $f606: f0 f9     
 __f608:     dex                ; $f608: ca        
@@ -6442,7 +6458,7 @@ __f64e:     rts                ; $f64e: 60
 ;-------------------------------------------------------------------------------
 __f64f:     .hex 8a a8 a8      ; $f64f: 8a a8 a8      Data
 __f652:     lda #$1e           ; $f652: a9 1e     
-            sta $07            ; $f654: 85 07     
+            sta vPPUMask            ; $f654: 85 07     
             jmp __f83a         ; $f656: 4c 3a f8  
 
 ;-------------------------------------------------------------------------------
@@ -6458,9 +6474,9 @@ __f659:     lda vCurrentLevel            ; $f659: a5 55
             cmp #$03           ; $f66c: c9 03     
             bcs __f681         ; $f66e: b0 11     
             lda #$3c           ; $f670: a9 3c     
-            sta $5c            ; $f672: 85 5c     
+            sta vBirdOffsetX            ; $f672: 85 5c     
             jsr __d186         ; $f674: 20 86 d1  
-            lda $5c            ; $f677: a5 5c     
+            lda vBirdOffsetX            ; $f677: a5 5c     
             cmp #$98           ; $f679: c9 98     
             bne __f680         ; $f67b: d0 03     
             inc $0252          ; $f67d: ee 52 02  
@@ -7040,17 +7056,25 @@ irq:        sei                ; $fd27: 78
             cld                ; $fd28: d8        
             ldx #$30           ; $fd29: a2 30     
             stx ppuControl          ; $fd2b: 8e 00 20  
-__fd2e:     lda $2002          ; $fd2e: ad 02 20  
-            bpl __fd2e         ; $fd31: 10 fb     
-__fd33:     lda $2002          ; $fd33: ad 02 20  
-            bpl __fd33         ; $fd36: 10 fb     
+			
+			; wait 2 vblanks
+__firstVBlank:     
+			lda ppuStatus          ; $fd2e: ad 02 20  
+            bpl __firstVBlank         ; $fd31: 10 fb     
+__secondVBlank:     
+			lda ppuStatus          ; $fd33: ad 02 20  
+            bpl __secondVBlank         ; $fd36: 10 fb 
+			
+			; hide everything
             ldx #$00           ; $fd38: a2 00     
-            stx $2001          ; $fd3a: 8e 01 20  
+            stx ppuMask          ; $fd3a: 8e 01 20  
+			; init stack with FF
             dex                ; $fd3d: ca        
-            txs                ; $fd3e: 9a        
+            txs                ; $fd3e: 9a      
+			
             jsr __fe87         ; $fd3f: 20 87 fe  
             jsr __fe64         ; $fd42: 20 64 fe  
-            jsr __fe2a         ; $fd45: 20 2a fe  
+            jsr __initZero_200_300         ; $fd45: 20 2a fe  
             lda #$20           ; $fd48: a9 20     
             jsr __fdf5         ; $fd4a: 20 f5 fd  
             lda #$20           ; $fd4d: a9 20     
@@ -7067,7 +7091,7 @@ __fd60:     lda __c021         ; $fd60: ad 21 c0
             lda #$b0           ; $fd6b: a9 b0     
             sta vPPUController            ; $fd6d: 85 06     
             lda #$1e           ; $fd6f: a9 1e     
-            sta $07            ; $fd71: 85 07     
+            sta vPPUMask            ; $fd71: 85 07     
             jsr __c030         ; $fd73: 20 30 c0  
             lda vPPUController            ; $fd76: a5 06     
             ora #$80           ; $fd78: 09 80     
@@ -7082,13 +7106,19 @@ __fd7f:     inc $08            ; $fd7f: e6 08
 ;-------------------------------------------------------------------------------
 ; nmi vector
 ;-------------------------------------------------------------------------------
-nmi:        lda #$00           ; $fd8a: a9 00     
-            sta $2003          ; $fd8c: 8d 03 20  
+nmi:        
+			; DMA offset
+			lda #$00           ; $fd8a: a9 00     
+            sta ppuOAMAddr          ; $fd8c: 8d 03 20  
+			
+			; upload DMA data
             lda #$06           ; $fd8f: a9 06     
-            sta $4014          ; $fd91: 8d 14 40  
-            lda $07            ; $fd94: a5 07     
-            sta $2001          ; $fd96: 8d 01 20  
-            lda $2002          ; $fd99: ad 02 20  
+            sta OAMDMA          ; $fd91: 8d 14 40  
+			; show everything (with sprites or not)
+            lda vPPUMask            ; $fd94: a5 07     
+            sta ppuMask          ; $fd96: 8d 01 20  
+			
+            lda ppuStatus          ; $fd99: ad 02 20  
             jsr __ChooseGameState         ; $fd9c: 20 33 c0  
             jsr __fea2         ; $fd9f: 20 a2 fe  
             rti                ; $fda2: 40        
@@ -7123,18 +7153,20 @@ __fdc6:     stx vPPUController            ; $fdc6: 86 06
             rts                ; $fdd5: 60        
 
 ;-------------------------------------------------------------------------------
-__fdd6:     lda $07            ; $fdd6: a5 07     
+__hideSprites:     
+			lda vPPUMask            ; $fdd6: a5 07     
             and #$ef           ; $fdd8: 29 ef     
-            sta $07            ; $fdda: 85 07     
+            sta vPPUMask            ; $fdda: 85 07     
             nop                ; $fddc: ea        
             nop                ; $fddd: ea        
             nop                ; $fdde: ea        
             rts                ; $fddf: 60        
 
 ;-------------------------------------------------------------------------------
-__fde0:     lda $07            ; $fde0: a5 07     
+__showSprites:     
+			lda vPPUMask            ; $fde0: a5 07     
             ora #$10           ; $fde2: 09 10     
-            sta $07            ; $fde4: 85 07     
+            sta vPPUMask            ; $fde4: 85 07     
             nop                ; $fde6: ea        
             nop                ; $fde7: ea        
             nop                ; $fde8: ea        
@@ -7180,14 +7212,16 @@ __fe21:     sta $2007          ; $fe21: 8d 07 20
             rts                ; $fe29: 60        
 
 ;-------------------------------------------------------------------------------
-__fe2a:     lda #$00           ; $fe2a: a9 00     
+__initZero_200_300:     
+			lda #$00           ; $fe2a: a9 00     
             tax                ; $fe2c: aa        
 __fe2d:     sta $00,x          ; $fe2d: 95 00     
             sta $0200,x        ; $fe2f: 9d 00 02  
             sta $0300,x        ; $fe32: 9d 00 03  
             nop                ; $fe35: ea        
             inx                ; $fe36: e8        
-            bne __fe2d         ; $fe37: d0 f4     
+            bne __fe2d         ; $fe37: d0 f4    
+			
             jsr __fdea         ; $fe39: 20 ea fd  
 __fe3c:     lda $0130,x        ; $fe3c: bd 30 01  
             cmp __c020,x       ; $fe3f: dd 20 c0  
@@ -7293,7 +7327,7 @@ __setPPUIncrementBy1:
             rts                ; $fee3: 60        
 
 ;-------------------------------------------------------------------------------
-__PPUIncrementBy32:     
+__setPPUIncrementBy32:     
 			lda vPPUController            ; $fee4: a5 06     
             ora #$04           ; $fee6: 09 04     
             sta vPPUController            ; $fee8: 85 06     
@@ -7303,12 +7337,12 @@ __PPUIncrementBy32:
 ;-------------------------------------------------------------------------------
 __disableDrawing:     
 			lda #$00           ; $feee: a9 00     
-            sta $2001          ; $fef0: 8d 01 20  
+            sta ppuMask          ; $fef0: 8d 01 20  
             rts                ; $fef3: 60        
 
 ;-------------------------------------------------------------------------------
-            lda $07            ; $fef4: a5 07     
-            sta $2001          ; $fef6: 8d 01 20  
+            lda vPPUMask            ; $fef4: a5 07     
+            sta ppuMask          ; $fef6: 8d 01 20  
             rts                ; $fef9: 60        
 
 ;-------------------------------------------------------------------------------
