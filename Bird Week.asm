@@ -17,25 +17,50 @@
             .hex 00 00 00 00   ; iNES Tail 
             .hex 00 00 00 00    
 			
+; Player Input (vPlayerInput)
+			; 0x01 - button A
+			; 0x02 - button B
+			; 0x04 - select
+			; 0x08 - start
+			; 0x10 - dup
+			; 0x20 - ddown
+			; 0x40 - dleft
+			; 0x80 - dright
 ; Variables
 			; Zero-page
+			
+			; Nabletable bird currently in
+			vBirdPPUNametable equ $02
+			; Position of bird in nametable
+			vBirdPPUX equ $03
 			vPPUController equ $06
 			vPPUMask equ $07
+			vRandomVar equ $08
 			vCycleCounter equ $09
 			vPlayerInput equ $0a
+			vPlayer2Input equ $0b
+			vRandomVar2 equ $17
 			vGameState equ $50
+			;vIsSelectPressed equ $51
+			; even values are "game start", odd values are "study mode" 
 			vGameMode equ $52
+			vDataAddress equ $53
+			vDataAddressHi equ $54
 			vCurrentLevel equ $55
 			vBirdLives equ $56
-			vMainMemuCounter equ $57
+			vMainMenuCounter equ $57
 			vWoodpeckerState equ $58
 			vBirdIsRight equ $5a
 			vBirdX equ $5b
 			vBirdOffsetX equ $5c
 			vBirdDirection equ $5d
+			vIsBirdLanded equ $61
+			vIsBirdLanding equ $62
 			vFoxX equ $7b
 			vWoodpeckerSquirrelX equ $7e
+			vBirdFallState equ $d2
 			vScoreScreenCounter equ $d4
+			vRoundNumber equ $f2
 			vIsGameLoading equ $f6
 			vGameLoadingCounter equ $f7
 			
@@ -49,13 +74,20 @@
 			; 0600 - sprite table
 			vWoodPeckerSprite equ $073d
 			
+			vLevelDataAbs equ $0030
 ; I/O registers
 			ppuControl equ $2000
 			ppuMask equ $2001
 			ppuStatus equ $2002
 			ppuOAMAddr equ $2003
+			ppuScroll equ $2005
 			ppuAddress equ $2006
+			ppuData equ $2007
+			
 			OAMDMA equ $4014
+			joy1port equ $4016
+			joy2port equ $4017
+			
 
 ;-------------------------------------------------------------------------------
 ; Program Origin
@@ -81,7 +113,7 @@ __c021:     .hex 0f 13 3f 00   ; $c021: 0f 13 3f 00   Data
 __c030:     jmp __f652         ; $c030: 4c 52 f6  
 
 ;-------------------------------------------------------------------------------
-__ChooseGameState:     
+__processGameState:     
 			lda vGameState            ; $c033: a5 50  
 			
 			; is game starting
@@ -149,14 +181,14 @@ __initGame:     jmp ___initGame         ; $c074: 4c 5b e1
 ;-------------------------------------------------------------------------------
 __mainMenuLoop:     
 			jsr __mainMenuHandleSelect         ; $c077: 20 15 cb  
-            jsr __cb2b         ; $c07a: 20 2b cb  
-            jmp __cb66         ; $c07d: 4c 66 cb  
+            jsr __drawMainMenuBird         ; $c07a: 20 2b cb  
+            jmp __handleMainMenuDemo         ; $c07d: 4c 66 cb  
 
 ;-------------------------------------------------------------------------------
 __gameLoadingLoop:     jmp ___gameLoadingLoop         ; $c080: 4c 5b c1  
 
 ;-------------------------------------------------------------------------------
-__c083:     jmp __e27c         ; $c083: 4c 7c e2  
+__initGameLoop:     jmp ___initGameLoop         ; $c083: 4c 7c e2  
 
 ;-------------------------------------------------------------------------------
 __c086:     jsr __c309         ; $c086: 20 09 c3  
@@ -168,12 +200,12 @@ __c086:     jsr __c309         ; $c086: 20 09 c3
             cmp #$01           ; $c097: c9 01     
             beq __c09d         ; $c099: f0 02     
             inc vGameState            ; $c09b: e6 50     
-__c09d:     jsr __fdb6         ; $c09d: 20 b6 fd  
+__c09d:     jsr __scrollScreen         ; $c09d: 20 b6 fd  
             jsr __c0d0         ; $c0a0: 20 d0 c0  
             jmp __enableNMI         ; $c0a3: 4c c6 fe  
 
 ;-------------------------------------------------------------------------------
-__c0a6:     jsr __c22c         ; $c0a6: 20 2c c2  
+__c0a6:     jsr __mainMenuHandleStart         ; $c0a6: 20 2c c2  
             jmp __c248         ; $c0a9: 4c 48 c2  
 
 ;-------------------------------------------------------------------------------
@@ -194,7 +226,7 @@ __c0d0:     lda $5e            ; $c0d0: a5 5e
             bne __c11c         ; $c0d2: d0 48     
             .hex ad a6 00      ; $c0d4: ad a6 00  Bad Addr Mode - LDA $00a6
             bne __c107         ; $c0d7: d0 2e     
-            jsr __isBonusLevel         ; $c0d9: 20 5e c3  
+            jsr __levelModulo4         ; $c0d9: 20 5e c3  
             cpx #$03           ; $c0dc: e0 03     
             beq __c0fe         ; $c0de: f0 1e     
             jsr __d503         ; $c0e0: 20 03 d5  
@@ -238,7 +270,7 @@ __c128:
             beq __c156         ; $c13f: f0 15     
             cmp #$0f           ; $c141: c9 0f     
             beq __c156         ; $c143: f0 11     
-            jsr __isBonusLevel         ; $c145: 20 5e c3  
+            jsr __levelModulo4         ; $c145: 20 5e c3  
             inx                ; $c148: e8        
             stx $20            ; $c149: 86 20     
 __c14b:     rts                ; $c14b: 60        
@@ -265,7 +297,7 @@ ___gameLoadingLoop:
             cmp #$40           ; $c161: c9 40     
             bne __incGameLoadingCounter         ; $c163: d0 03     
 			
-            jmp __c083         ; $c165: 4c 83 c0  
+            jmp __initGameLoop         ; $c165: 4c 83 c0  
 
 ;-------------------------------------------------------------------------------
 __incGameLoadingCounter:     
@@ -285,7 +317,7 @@ __initGameLoading:
             stx $d3            ; $c17d: 86 d3     
             jsr __c1d4         ; $c17f: 20 d4 c1  
 __c182:     lda __c221,x       ; $c182: bd 21 c2  
-            sta $2007          ; $c185: 8d 07 20  
+            sta ppuData          ; $c185: 8d 07 20  
             inx                ; $c188: e8        
             cpx #$08           ; $c189: e0 08     
             bne __c182         ; $c18b: d0 f5     
@@ -293,16 +325,16 @@ __c182:     lda __c221,x       ; $c182: bd 21 c2
 __c18f:     lda $f1,x          ; $c18f: b5 f1     
             bne __c1a3         ; $c191: d0 10     
             lda #$24           ; $c193: a9 24     
-            sta $2007          ; $c195: 8d 07 20  
+            sta ppuData          ; $c195: 8d 07 20  
             dex                ; $c198: ca        
             bne __c18f         ; $c199: d0 f4     
 __c19b:     inc vIsGameLoading            ; $c19b: e6 f6     
-            jsr __fdb6         ; $c19d: 20 b6 fd  
+            jsr __scrollScreen         ; $c19d: 20 b6 fd  
             jmp __enableNMI         ; $c1a0: 4c c6 fe  
 
 ;-------------------------------------------------------------------------------
 __c1a3:     lda $f1,x          ; $c1a3: b5 f1     
-            sta $2007          ; $c1a5: 8d 07 20  
+            sta ppuData          ; $c1a5: 8d 07 20  
             dex                ; $c1a8: ca        
             bne __c1a3         ; $c1a9: d0 f8     
             beq __c19b         ; $c1ab: f0 ee     
@@ -311,20 +343,20 @@ __gameLoadingDone:
             rts                ; $c1af: 60        
 
 ;-------------------------------------------------------------------------------
-__c1b0:     jsr __d716         ; $c1b0: 20 16 d7  
+__c1b0:     jsr __clearXY         ; $c1b0: 20 16 d7  
             jsr __c1d4         ; $c1b3: 20 d4 c1  
 __c1b6:     lda __ca3e,x       ; $c1b6: bd 3e ca  
-            sta $2007          ; $c1b9: 8d 07 20  
+            sta ppuData          ; $c1b9: 8d 07 20  
             inx                ; $c1bc: e8        
             cpx #$06           ; $c1bd: e0 06     
             bne __c1b6         ; $c1bf: d0 f5     
 __c1c1:     lda __c221,y       ; $c1c1: b9 21 c2  
-            sta $2007          ; $c1c4: 8d 07 20  
+            sta ppuData          ; $c1c4: 8d 07 20  
             iny                ; $c1c7: c8        
             cpy #$05           ; $c1c8: c0 05     
             bne __c1c1         ; $c1ca: d0 f5     
             inc vIsGameLoading            ; $c1cc: e6 f6     
-            jsr __fdb6         ; $c1ce: 20 b6 fd  
+            jsr __scrollScreen         ; $c1ce: 20 b6 fd  
             jmp __enableNMI         ; $c1d1: 4c c6 fe  
 
 ;-------------------------------------------------------------------------------
@@ -335,7 +367,7 @@ __c1d4:     lda #$20           ; $c1d4: a9 20
             rts                ; $c1de: 60        
 
 ;-------------------------------------------------------------------------------
-__c1df:     jsr __isBonusLevel         ; $c1df: 20 5e c3  
+__c1df:     jsr __levelModulo4         ; $c1df: 20 5e c3  
             cpx #$03           ; $c1e2: e0 03     
             beq __c208         ; $c1e4: f0 22     
             lda #$20           ; $c1e6: a9 20     
@@ -346,12 +378,12 @@ __c1df:     jsr __isBonusLevel         ; $c1df: 20 5e c3
 __c1f2:     lda $0f,x          ; $c1f2: b5 0f     
             bne __c200         ; $c1f4: d0 0a     
             lda #$24           ; $c1f6: a9 24     
-            sta $2007          ; $c1f8: 8d 07 20  
+            sta ppuData          ; $c1f8: 8d 07 20  
             dex                ; $c1fb: ca        
             cpx #$01           ; $c1fc: e0 01     
             bne __c1f2         ; $c1fe: d0 f2     
 __c200:     lda $0f,x          ; $c200: b5 0f     
-            sta $2007          ; $c202: 8d 07 20  
+            sta ppuData          ; $c202: 8d 07 20  
             dex                ; $c205: ca        
             bne __c200         ; $c206: d0 f8     
 __c208:     rts                ; $c208: 60        
@@ -380,7 +412,8 @@ __c221:     .hex 1b 18 1e 17   ; $c221: 1b 18 1e 17   Data
 __c229:     .hex dd df db      ; $c229: dd df db      Data
 
 ;-------------------------------------------------------------------------------
-__c22c:     lda vCycleCounter            ; $c22c: a5 09     
+__mainMenuHandleStart:     
+			lda vCycleCounter            ; $c22c: a5 09     
             and #$07           ; $c22e: 29 07     
             bne __c247         ; $c230: d0 15     
             lda vPlayerInput            ; $c232: a5 0a     
@@ -409,7 +442,7 @@ __c248:     lda $d1            ; $c248: a5 d1
             lda vGameState            ; $c257: a5 50     
             cmp #$fc           ; $c259: c9 fc     
             beq __c26e         ; $c25b: f0 11     
-            jsr __d716         ; $c25d: 20 16 d7  
+            jsr __clearXY         ; $c25d: 20 16 d7  
             lda #$f0           ; $c260: a9 f0     
 __c262:     sta $0704,x        ; $c262: 9d 04 07  
             inx                ; $c265: e8        
@@ -461,7 +494,7 @@ __c2b0:     lda #$00           ; $c2b0: a9 00
             rts                ; $c2b5: 60        
 
 ;-------------------------------------------------------------------------------
-__c2b6:     jsr __isBonusLevel         ; $c2b6: 20 5e c3  
+__c2b6:     jsr __levelModulo4         ; $c2b6: 20 5e c3  
             cpx #$03           ; $c2b9: e0 03     
             beq __c2e9         ; $c2bb: f0 2c     
             lda vCycleCounter            ; $c2bd: a5 09     
@@ -512,7 +545,7 @@ __c304:     inc $5e            ; $c304: e6 5e
 
 ;-------------------------------------------------------------------------------
 __c309:     jsr __setPPUIncrementBy32         ; $c309: 20 e4 fe  
-            jsr __isBonusLevel         ; $c30c: 20 5e c3  
+            jsr __levelModulo4         ; $c30c: 20 5e c3  
             cpx #$03           ; $c30f: e0 03     
             beq __c31c         ; $c311: f0 09     
             jsr __c31f         ; $c313: 20 1f c3  
@@ -522,13 +555,13 @@ __c31c:     jmp __setPPUIncrementBy1         ; $c31c: 4c da fe
 
 ;-------------------------------------------------------------------------------
 __c31f:     lda #$21           ; $c31f: a9 21     
-            sta $53            ; $c321: 85 53     
+            sta vDataAddress            ; $c321: 85 53     
             ldy #$00           ; $c323: a0 00     
             lda $8c            ; $c325: a5 8c     
             cmp $65            ; $c327: c5 65     
             beq __c345         ; $c329: f0 1a     
             lda __c364,x       ; $c32b: bd 64 c3  
-            sta $54            ; $c32e: 85 54     
+            sta vDataAddressHi            ; $c32e: 85 54     
             jmp __c36d         ; $c330: 4c 6d c3  
 
 ;-------------------------------------------------------------------------------
@@ -536,9 +569,9 @@ __c333:     iny                ; $c333: c8
             lda $8d            ; $c334: a5 8d     
             cmp $65            ; $c336: c5 65     
             beq __c345         ; $c338: f0 0b     
-            jsr __isBonusLevel         ; $c33a: 20 5e c3  
+            jsr __levelModulo4         ; $c33a: 20 5e c3  
             lda __c367,x       ; $c33d: bd 67 c3  
-            sta $54            ; $c340: 85 54     
+            sta vDataAddressHi            ; $c340: 85 54     
             jsr __c36d         ; $c342: 20 6d c3  
 __c345:     rts                ; $c345: 60        
 
@@ -550,14 +583,14 @@ __c346:     lda vCurrentLevel            ; $c346: a5 55
             lda $8e            ; $c34d: a5 8e     
             cmp $65            ; $c34f: c5 65     
             beq __c345         ; $c351: f0 f2     
-            jsr __isBonusLevel         ; $c353: 20 5e c3  
+            jsr __levelModulo4         ; $c353: 20 5e c3  
             lda __c36a,x       ; $c356: bd 6a c3  
-            sta $54            ; $c359: 85 54     
+            sta vDataAddressHi            ; $c359: 85 54     
             jmp __c36d         ; $c35b: 4c 6d c3  
 
 ;-------------------------------------------------------------------------------
-; writes 11 to X if current level is bonus level (every 4th level)
-__isBonusLevel:     
+; gets modulo 4 of current level
+__levelModulo4:     
 			lda vCurrentLevel            ; $c35e: a5 55     
             and #$03           ; $c360: 29 03     
             tax                ; $c362: aa        
@@ -582,14 +615,14 @@ __c36d:     jsr __c404         ; $c36d: 20 04 c4
             bcs __c3af         ; $c383: b0 2a     
 __c385:     jsr __d08b         ; $c385: 20 8b d0  
 __c388:     lda __c3b9,x       ; $c388: bd b9 c3  
-            sta $2007          ; $c38b: 8d 07 20  
+            sta ppuData          ; $c38b: 8d 07 20  
             lda __c3bf,x       ; $c38e: bd bf c3  
-            sta $2007          ; $c391: 8d 07 20  
+            sta ppuData          ; $c391: 8d 07 20  
             jsr __c40f         ; $c394: 20 0f c4  
             lda __c3c5,x       ; $c397: bd c5 c3  
-            sta $2007          ; $c39a: 8d 07 20  
+            sta ppuData          ; $c39a: 8d 07 20  
             lda __c3cb,x       ; $c39d: bd cb c3  
-            sta $2007          ; $c3a0: 8d 07 20  
+            sta ppuData          ; $c3a0: 8d 07 20  
             rts                ; $c3a3: 60        
 
 ;-------------------------------------------------------------------------------
@@ -622,16 +655,16 @@ __c3cb:     .hex e3 e7 ef eb   ; $c3cb: e3 e7 ef eb   Data
 __c3d1:     jsr __setPPUIncrementBy32         ; $c3d1: 20 e4 fe  
             jsr __c404         ; $c3d4: 20 04 c4  
             lda __c41c,x       ; $c3d7: bd 1c c4  
-            sta $2007          ; $c3da: 8d 07 20  
+            sta ppuData          ; $c3da: 8d 07 20  
             lda __c426,x       ; $c3dd: bd 26 c4  
-            sta $2007          ; $c3e0: 8d 07 20  
+            sta ppuData          ; $c3e0: 8d 07 20  
             jsr __c40f         ; $c3e3: 20 0f c4  
             lda __c430,x       ; $c3e6: bd 30 c4  
-            sta $2007          ; $c3e9: 8d 07 20  
+            sta ppuData          ; $c3e9: 8d 07 20  
             lda __c43a,x       ; $c3ec: bd 3a c4  
-            sta $2007          ; $c3ef: 8d 07 20  
+            sta ppuData          ; $c3ef: 8d 07 20  
             jsr __setPPUIncrementBy1         ; $c3f2: 20 da fe  
-            jsr __fdb6         ; $c3f5: 20 b6 fd  
+            jsr __scrollScreen         ; $c3f5: 20 b6 fd  
             lda vGameState            ; $c3f8: a5 50     
             cmp #$ff           ; $c3fa: c9 ff     
             bne __c401         ; $c3fc: d0 03     
@@ -639,17 +672,17 @@ __c3d1:     jsr __setPPUIncrementBy32         ; $c3d1: 20 e4 fe
 __c401:     jmp __c122         ; $c401: 4c 22 c1  
 
 ;-------------------------------------------------------------------------------
-__c404:     lda $53            ; $c404: a5 53     
+__c404:     lda vDataAddress            ; $c404: a5 53     
             sta ppuAddress          ; $c406: 8d 06 20  
-            lda $54            ; $c409: a5 54     
+            lda vDataAddressHi            ; $c409: a5 54     
             sta ppuAddress          ; $c40b: 8d 06 20  
             rts                ; $c40e: 60        
 
 ;-------------------------------------------------------------------------------
-__c40f:     lda $53            ; $c40f: a5 53     
+__c40f:     lda vDataAddress            ; $c40f: a5 53     
             sta ppuAddress          ; $c411: 8d 06 20  
-            inc $54            ; $c414: e6 54     
-            lda $54            ; $c416: a5 54     
+            inc vDataAddressHi            ; $c414: e6 54     
+            lda vDataAddressHi            ; $c416: a5 54     
             sta ppuAddress          ; $c418: 8d 06 20  
             rts                ; $c41b: 60        
 
@@ -715,7 +748,7 @@ __c485:     inx                ; $c485: e8
             beq __c4c3         ; $c490: f0 31     
             cpx #$13           ; $c492: e0 13     
             bne __c45a         ; $c494: d0 c4     
-            jsr __isBonusLevel         ; $c496: 20 5e c3  
+            jsr __levelModulo4         ; $c496: 20 5e c3  
             cpx #$03           ; $c499: e0 03     
             bne __c4a1         ; $c49b: d0 04     
             lda #$00           ; $c49d: a9 00     
@@ -771,7 +804,7 @@ __c4d9:     lda $9a            ; $c4d9: a5 9a
 __c4f2:     lda $9a            ; $c4f2: a5 9a     
             ldx $0210          ; $c4f4: ae 10 02  
             bne __c4ff         ; $c4f7: d0 06     
-            jsr __d716         ; $c4f9: 20 16 d7  
+            jsr __clearXY         ; $c4f9: 20 16 d7  
             jsr __c571         ; $c4fc: 20 71 c5  
 __c4ff:     ldx $0213          ; $c4ff: ae 13 02  
             bne __c50b         ; $c502: d0 07     
@@ -812,7 +845,7 @@ __c545:     lda #$03           ; $c545: a9 03
 __c549:     jmp __c57f         ; $c549: 4c 7f c5  
 
 ;-------------------------------------------------------------------------------
-__c54c:     jsr __d716         ; $c54c: 20 16 d7  
+__c54c:     jsr __clearXY         ; $c54c: 20 16 d7  
 __c54f:     lda $78,x          ; $c54f: b5 78     
             sec                ; $c551: 38        
             sbc #$04           ; $c552: e9 04     
@@ -954,7 +987,7 @@ __c641:     jmp __c6e5         ; $c641: 4c e5 c6
 ;-------------------------------------------------------------------------------
 __c644:     jsr __f618         ; $c644: 20 18 f6  
             jsr __f5e8         ; $c647: 20 e8 f5  
-            lda $d2            ; $c64a: a5 d2     
+            lda vBirdFallState            ; $c64a: a5 d2     
             beq __c657         ; $c64c: f0 09     
             cmp #$01           ; $c64e: c9 01     
             beq __c665         ; $c650: f0 13     
@@ -967,7 +1000,7 @@ __c657:     lda vPlayMainMenuMusic          ; $c657: ad 73 02
             bne __c660         ; $c65a: d0 04     
             lda #$06           ; $c65c: a9 06     
             sta $20            ; $c65e: 85 20     
-__c660:     inc $d2            ; $c660: e6 d2     
+__c660:     inc vBirdFallState            ; $c660: e6 d2     
             jmp __c122         ; $c662: 4c 22 c1  
 
 ;-------------------------------------------------------------------------------
@@ -991,19 +1024,20 @@ __c685:     lda __c6b2,x       ; $c685: bd b2 c6
 ;-------------------------------------------------------------------------------
 __c68e:     lda vPlayMainMenuMusic          ; $c68e: ad 73 02  
             bne __c69c         ; $c691: d0 09     
-            inc $d2            ; $c693: e6 d2     
+            inc vBirdFallState            ; $c693: e6 d2     
             lda #$07           ; $c695: a9 07     
             sta $20            ; $c697: 85 20     
             jmp __c122         ; $c699: 4c 22 c1  
 
 ;-------------------------------------------------------------------------------
-__c69c:     jsr __c6a2         ; $c69c: 20 a2 c6  
+__c69c:     jsr __clearBirdNametable         ; $c69c: 20 a2 c6  
             jmp __f467         ; $c69f: 4c 67 f4  
 
 ;-------------------------------------------------------------------------------
-__c6a2:     lda #$00           ; $c6a2: a9 00     
-            sta $02            ; $c6a4: 85 02     
-            sta $03            ; $c6a6: 85 03     
+__clearBirdNametable:     
+			lda #$00           ; $c6a2: a9 00     
+            sta vBirdPPUNametable            ; $c6a4: 85 02     
+            sta vBirdPPUX            ; $c6a6: 85 03     
             rts                ; $c6a8: 60        
 
 ;-------------------------------------------------------------------------------
@@ -1017,7 +1051,7 @@ __c6b2:     .hex 12 13 12 13   ; $c6b2: 12 13 12 13   Data
             .hex 14            ; $c6b6: 14            Data
 
 ;-------------------------------------------------------------------------------
-__c6b7:     jsr __isBonusLevel         ; $c6b7: 20 5e c3  
+__c6b7:     jsr __levelModulo4         ; $c6b7: 20 5e c3  
             lda $8c            ; $c6ba: a5 8c     
             cmp $64            ; $c6bc: c5 64     
             beq __c6c7         ; $c6be: f0 07     
@@ -1028,17 +1062,17 @@ __c6b7:     jsr __isBonusLevel         ; $c6b7: 20 5e c3
 
 ;-------------------------------------------------------------------------------
 __c6c7:     lda #$21           ; $c6c7: a9 21     
-            sta $53            ; $c6c9: 85 53     
+            sta vDataAddress            ; $c6c9: 85 53     
             lda __c815,x       ; $c6cb: bd 15 c8  
-            sta $54            ; $c6ce: 85 54     
+            sta vDataAddressHi            ; $c6ce: 85 54     
             jsr __c81e         ; $c6d0: 20 1e c8  
             jmp __c3d1         ; $c6d3: 4c d1 c3  
 
 ;-------------------------------------------------------------------------------
 __c6d6:     lda #$21           ; $c6d6: a9 21     
-            sta $53            ; $c6d8: 85 53     
+            sta vDataAddress            ; $c6d8: 85 53     
             lda __c818,x       ; $c6da: bd 18 c8  
-            sta $54            ; $c6dd: 85 54     
+            sta vDataAddressHi            ; $c6dd: 85 54     
             jsr __c81e         ; $c6df: 20 1e c8  
             jmp __c3d1         ; $c6e2: 4c d1 c3  
 
@@ -1064,7 +1098,7 @@ __c705:     jmp __c752         ; $c705: 4c 52 c7
 __c708:     .hex 7f 80 7f 80   ; $c708: 7f 80 7f 80   Data
 
 ;-------------------------------------------------------------------------------
-__c70c:     jsr __c6a2         ; $c70c: 20 a2 c6  
+__c70c:     jsr __clearBirdNametable         ; $c70c: 20 a2 c6  
             jsr __c776         ; $c70f: 20 76 c7  
             sta $5e            ; $c712: 85 5e     
             lda #$f0           ; $c714: a9 f0     
@@ -1142,7 +1176,7 @@ __c776:     lda #$00           ; $c776: a9 00
             sta $c0            ; $c799: 85 c0     
             sta $c5            ; $c79b: 85 c5     
             sta $be            ; $c79d: 85 be     
-            sta $d2            ; $c79f: 85 d2     
+            sta vBirdFallState            ; $c79f: 85 d2     
             sta $ea            ; $c7a1: 85 ea     
             sta $eb            ; $c7a3: 85 eb     
 __c7a5:     tax                ; $c7a5: aa        
@@ -1170,17 +1204,17 @@ __c7b8:     lda #$00           ; $c7b8: a9 00
 __c7cc:     jsr __setPPUIncrementBy1         ; $c7cc: 20 da fe  
             jsr __c209         ; $c7cf: 20 09 c2  
             jsr __c1df         ; $c7d2: 20 df c1  
-            jsr __fdb6         ; $c7d5: 20 b6 fd  
+            jsr __scrollScreen         ; $c7d5: 20 b6 fd  
 __c7d8:     lda #$00           ; $c7d8: a9 00     
             sta $5e            ; $c7da: 85 5e     
             sta $63            ; $c7dc: 85 63     
-            sta $d2            ; $c7de: 85 d2     
+            sta vBirdFallState            ; $c7de: 85 d2     
             lda #$f8           ; $c7e0: a9 f8     
             sta $9d            ; $c7e2: 85 9d     
             jmp __c29f         ; $c7e4: 4c 9f c2  
 
 ;-------------------------------------------------------------------------------
-__c7e7:     jsr __isBonusLevel         ; $c7e7: 20 5e c3  
+__c7e7:     jsr __levelModulo4         ; $c7e7: 20 5e c3  
             lda $8c            ; $c7ea: a5 8c     
             cmp $64            ; $c7ec: c5 64     
             beq __c7fd         ; $c7ee: f0 0d     
@@ -1200,9 +1234,9 @@ __c800:     jmp __c6d6         ; $c800: 4c d6 c6
 
 ;-------------------------------------------------------------------------------
 __c803:     lda #$21           ; $c803: a9 21     
-            sta $53            ; $c805: 85 53     
+            sta vDataAddress            ; $c805: 85 53     
             lda __c81b,x       ; $c807: bd 1b c8  
-            sta $54            ; $c80a: 85 54     
+            sta vDataAddressHi            ; $c80a: 85 54     
             jsr __c81e         ; $c80c: 20 1e c8  
             jmp __c3d1         ; $c80f: 4c d1 c3  
 
@@ -1241,7 +1275,7 @@ __c83f:     txa                ; $c83f: 8a
             rts                ; $c844: 60        
 
 ;-------------------------------------------------------------------------------
-__c845:     jsr __isBonusLevel         ; $c845: 20 5e c3  
+__c845:     jsr __levelModulo4         ; $c845: 20 5e c3  
             lda __c879,x       ; $c848: bd 79 c8  
             sta $9d            ; $c84b: 85 9d     
             lda $8c            ; $c84d: a5 8c     
@@ -1298,7 +1332,7 @@ __c8a0:     lda #$00           ; $c8a0: a9 00
             jmp __c69c         ; $c8a8: 4c 9c c6  
 
 ;-------------------------------------------------------------------------------
-__c8ab:     jsr __c6a2         ; $c8ab: 20 a2 c6  
+__c8ab:     jsr __clearBirdNametable         ; $c8ab: 20 a2 c6  
             cpy #$03           ; $c8ae: c0 03     
             bne __c8bc         ; $c8b0: d0 0a     
             lda #$08           ; $c8b2: a9 08     
@@ -1313,7 +1347,7 @@ __c8bc:     lda #$00           ; $c8bc: a9 00
 
 ;-------------------------------------------------------------------------------
 __c8c3:     jsr __ca4a         ; $c8c3: 20 4a ca  
-            jsr __fdb6         ; $c8c6: 20 b6 fd  
+            jsr __scrollScreen         ; $c8c6: 20 b6 fd  
             jsr __hideSprites         ; $c8c9: 20 d6 fd  
             jsr __f6dd         ; $c8cc: 20 dd f6  
             inc $d3            ; $c8cf: e6 d3     
@@ -1417,7 +1451,7 @@ __c96f:     lda $8b            ; $c96f: a5 8b
             jsr __c99c         ; $c979: 20 9c c9  
             jsr __ff15         ; $c97c: 20 15 ff  
             jsr __ca4a         ; $c97f: 20 4a ca  
-            jsr __fdb6         ; $c982: 20 b6 fd  
+            jsr __scrollScreen         ; $c982: 20 b6 fd  
             dec $8b            ; $c985: c6 8b     
             lda #$0f           ; $c987: a9 0f     
             sta $20            ; $c989: 85 20     
@@ -1447,7 +1481,7 @@ __c9ad:     lda #$21           ; $c9ad: a9 21
             sta ppuAddress          ; $c9b4: 8d 06 20  
             ldx #$00           ; $c9b7: a2 00     
 __c9b9:     lda __c9c5,x       ; $c9b9: bd c5 c9  
-            sta $2007          ; $c9bc: 8d 07 20  
+            sta ppuData          ; $c9bc: 8d 07 20  
             inx                ; $c9bf: e8        
             cpx #$06           ; $c9c0: e0 06     
             bne __c9b9         ; $c9c2: d0 f5     
@@ -1462,11 +1496,11 @@ __c9cb:     lda #$21           ; $c9cb: a9 21
             sta ppuAddress          ; $c9d2: 8d 06 20  
             ldx #$00           ; $c9d5: a2 00     
 __c9d7:     lda __ca36,x       ; $c9d7: bd 36 ca  
-            sta $2007          ; $c9da: 8d 07 20  
+            sta ppuData          ; $c9da: 8d 07 20  
             inx                ; $c9dd: e8        
             cpx #$08           ; $c9de: e0 08     
             bne __c9d7         ; $c9e0: d0 f5     
-            jmp __fdb6         ; $c9e2: 4c b6 fd  
+            jmp __scrollScreen         ; $c9e2: 4c b6 fd  
 
 ;-------------------------------------------------------------------------------
 __c9e5:     jsr __ff1a         ; $c9e5: 20 1a ff  
@@ -1478,7 +1512,7 @@ __c9eb:     jsr __ff1a         ; $c9eb: 20 1a ff
             sta ppuAddress          ; $c9f5: 8d 06 20  
             ldx #$00           ; $c9f8: a2 00     
 __c9fa:     lda __ca3e,x       ; $c9fa: bd 3e ca  
-            sta $2007          ; $c9fd: 8d 07 20  
+            sta ppuData          ; $c9fd: 8d 07 20  
             inx                ; $ca00: e8        
             cpx #$0c           ; $ca01: e0 0c     
             bne __c9fa         ; $ca03: d0 f5     
@@ -1487,15 +1521,15 @@ __c9fa:     lda __ca3e,x       ; $c9fa: bd 3e ca
             lda $0229          ; $ca0a: ad 29 02  
             bne __ca2c         ; $ca0d: d0 1d     
             lda #$03           ; $ca0f: a9 03     
-__ca11:     sta $2007          ; $ca11: 8d 07 20  
+__ca11:     sta ppuData          ; $ca11: 8d 07 20  
             lda #$00           ; $ca14: a9 00     
-            sta $2007          ; $ca16: 8d 07 20  
-            sta $2007          ; $ca19: 8d 07 20  
-            sta $2007          ; $ca1c: 8d 07 20  
+            sta ppuData          ; $ca16: 8d 07 20  
+            sta ppuData          ; $ca19: 8d 07 20  
+            sta ppuData          ; $ca1c: 8d 07 20  
             lda #$0f           ; $ca1f: a9 0f     
             sta $20            ; $ca21: 85 20     
             jsr __ca4a         ; $ca23: 20 4a ca  
-            jsr __fdb6         ; $ca26: 20 b6 fd  
+            jsr __scrollScreen         ; $ca26: 20 b6 fd  
             jmp __f6dd         ; $ca29: 4c dd f6  
 
 ;-------------------------------------------------------------------------------
@@ -1520,7 +1554,7 @@ __ca4a:     ldx #$00           ; $ca4a: a2 00
             lda #$c8           ; $ca51: a9 c8     
             sta ppuAddress          ; $ca53: 8d 06 20  
 __ca56:     lda __ca8c,x       ; $ca56: bd 8c ca  
-            sta $2007          ; $ca59: 8d 07 20  
+            sta ppuData          ; $ca59: 8d 07 20  
             inx                ; $ca5c: e8        
             cpx #$05           ; $ca5d: e0 05     
             bne __ca56         ; $ca5f: d0 f5     
@@ -1532,16 +1566,16 @@ __ca6b:     ldx #$07           ; $ca6b: a2 07
 __ca6d:     lda $0100,x        ; $ca6d: bd 00 01  
             bne __ca80         ; $ca70: d0 0e     
             lda #$24           ; $ca72: a9 24     
-            sta $2007          ; $ca74: 8d 07 20  
+            sta ppuData          ; $ca74: 8d 07 20  
             dex                ; $ca77: ca        
             bne __ca6d         ; $ca78: d0 f3     
 __ca7a:     lda #$00           ; $ca7a: a9 00     
-            sta $2007          ; $ca7c: 8d 07 20  
+            sta ppuData          ; $ca7c: 8d 07 20  
 __ca7f:     rts                ; $ca7f: 60        
 
 ;-------------------------------------------------------------------------------
 __ca80:     lda $0100,x        ; $ca80: bd 00 01  
-            sta $2007          ; $ca83: 8d 07 20  
+            sta ppuData          ; $ca83: 8d 07 20  
             dex                ; $ca86: ca        
             bne __ca80         ; $ca87: d0 f7     
             jmp __ca7a         ; $ca89: 4c 7a ca  
@@ -1551,7 +1585,7 @@ __ca8c:     .hex 1c 0c 18 1b   ; $ca8c: 1c 0c 18 1b   Data
             .hex 0e            ; $ca90: 0e            Data
 
 ;-------------------------------------------------------------------------------
-__ca91:     jsr __isBonusLevel         ; $ca91: 20 5e c3  
+__ca91:     jsr __levelModulo4         ; $ca91: 20 5e c3  
             cpx #$03           ; $ca94: e0 03     
             beq __ca7f         ; $ca96: f0 e7     
             ldx #$00           ; $ca98: a2 00     
@@ -1560,7 +1594,7 @@ __ca91:     jsr __isBonusLevel         ; $ca91: 20 5e c3
             lda #$69           ; $ca9f: a9 69     
             sta ppuAddress          ; $caa1: 8d 06 20  
 __caa4:     lda __ca8c,x       ; $caa4: bd 8c ca  
-            sta $2007          ; $caa7: 8d 07 20  
+            sta ppuData          ; $caa7: 8d 07 20  
             inx                ; $caaa: e8        
             cpx #$05           ; $caab: e0 05     
             bne __caa4         ; $caad: d0 f5     
@@ -1606,23 +1640,24 @@ __caf5:     lda vCurrentLevel            ; $caf5: a5 55
             cmp #$03           ; $caf9: c9 03     
             beq __cb11         ; $cafb: f0 14     
             ldx #$00           ; $cafd: a2 00     
-__caff:     lda $f2,x          ; $caff: b5 f2     
+__caff:     lda vRoundNumber,x          ; $caff: b5 f2     
             clc                ; $cb01: 18        
             adc #$01           ; $cb02: 69 01     
             cmp #$0a           ; $cb04: c9 0a     
             bne __cb12         ; $cb06: d0 0a     
             lda #$00           ; $cb08: a9 00     
-            sta $f2,x          ; $cb0a: 95 f2     
+            sta vRoundNumber,x          ; $cb0a: 95 f2     
             inx                ; $cb0c: e8        
             cpx #$03           ; $cb0d: e0 03     
             bne __caff         ; $cb0f: d0 ee     
 __cb11:     rts                ; $cb11: 60        
 
 ;-------------------------------------------------------------------------------
-__cb12:     sta $f2,x          ; $cb12: 95 f2     
+__cb12:     sta vRoundNumber,x          ; $cb12: 95 f2     
             rts                ; $cb14: 60        
 
 ;-------------------------------------------------------------------------------
+; toogle game modes in main menu
 __mainMenuHandleSelect:     
 			lda vPlayerInput            ; $cb15: a5 0a     
 			
@@ -1646,47 +1681,55 @@ __cb20:
 __cb2a:     rts                ; $cb2a: 60        
 
 ;-------------------------------------------------------------------------------
-__cb2b:     
+__drawMainMenuBird:     
 			; is it time to show demo play?
-			lda vMainMemuCounter            ; $cb2b: a5 57     
+			lda vMainMenuCounter            ; $cb2b: a5 57     
             cmp #$20           ; $cb2d: c9 20     
             beq __cb2a         ; $cb2f: f0 f9     
             bcs __cb2a         ; $cb31: b0 f7     
 			
             jsr __setPPUIncrementBy32         ; $cb33: 20 e4 fe  
-            jsr __d716         ; $cb36: 20 16 d7  
+            jsr __clearXY         ; $cb36: 20 16 d7  
+			
+			; draw bird either on "game start", or "study mode" label
             lda #$22           ; $cb39: a9 22     
             sta ppuAddress          ; $cb3b: 8d 06 20  
             lda #$89           ; $cb3e: a9 89     
             sta ppuAddress          ; $cb40: 8d 06 20  
             lda vGameMode            ; $cb43: a5 52     
             and #$01           ; $cb45: 29 01     
-            bne __cb5b         ; $cb47: d0 12     
-__cb49:     lda __cc35,x       ; $cb49: bd 35 cc  
-            sta $2007          ; $cb4c: 8d 07 20  
+			; is study mode
+            bne __mainMenuOnStudyGame         ; $cb47: d0 12 
+			
+__drawMainMenuBirdLoop:     
+			lda __cc35,x       ; $cb49: bd 35 cc  
+            sta ppuData          ; $cb4c: 8d 07 20  
             inx                ; $cb4f: e8        
             iny                ; $cb50: c8        
             cpy #$03           ; $cb51: c0 03     
-            bne __cb49         ; $cb53: d0 f4     
-            jsr __fdb6         ; $cb55: 20 b6 fd  
+            bne __drawMainMenuBirdLoop         ; $cb53: d0 f4   
+			
+            jsr __scrollScreen         ; $cb55: 20 b6 fd  
             jmp __setPPUIncrementBy1         ; $cb58: 4c da fe  
 
 ;-------------------------------------------------------------------------------
-__cb5b:     ldx #$03           ; $cb5b: a2 03     
-            jmp __cb49         ; $cb5d: 4c 49 cb  
+__mainMenuOnStudyGame:     
+			ldx #$03           ; $cb5b: a2 03     
+            jmp __drawMainMenuBirdLoop         ; $cb5d: 4c 49 cb  
 
 ;-------------------------------------------------------------------------------
-__cb60:     jmp __cbcf         ; $cb60: 4c cf cb  
+__initGameDemo:     jmp ___initGameDemo         ; $cb60: 4c cf cb  
 
 ;-------------------------------------------------------------------------------
 __cb63:     jmp __cbea         ; $cb63: 4c ea cb  
 
 ;-------------------------------------------------------------------------------
-__cb66:     lda vMainMemuCounter            ; $cb66: a5 57     
+__handleMainMenuDemo:     
+			lda vMainMenuCounter            ; $cb66: a5 57     
             cmp #$20           ; $cb68: c9 20     
-            beq __cb60         ; $cb6a: f0 f4     
+            beq __initGameDemo         ; $cb6a: f0 f4     
             bcs __cb63         ; $cb6c: b0 f5     
-            jsr __c22c         ; $cb6e: 20 2c c2  
+            jsr __mainMenuHandleStart         ; $cb6e: 20 2c c2  
             lda $d1            ; $cb71: a5 d1     
             and #$01           ; $cb73: 29 01     
             beq __cbaa         ; $cb75: f0 33     
@@ -1696,7 +1739,7 @@ __cb66:     lda vMainMemuCounter            ; $cb66: a5 57
             lda #$00           ; $cb7d: a9 00     
             sta vCurrentLevel            ; $cb7f: 85 55     
             lda #$01           ; $cb81: a9 01     
-            sta $f2            ; $cb83: 85 f2     
+            sta vRoundNumber            ; $cb83: 85 f2     
 __cb85:     lda #$01           ; $cb85: a9 01     
             sta $d1            ; $cb87: 85 d1     
             lda #$03           ; $cb89: a9 03     
@@ -1707,7 +1750,7 @@ __cb85:     lda #$01           ; $cb85: a9 01
             lda #$00           ; $cb93: a9 00     
             sta $a7            ; $cb95: 85 a7     
             sta vPlayMainMenuMusic          ; $cb97: 8d 73 02  
-            jsr __fdb6         ; $cb9a: 20 b6 fd  
+            jsr __scrollScreen         ; $cb9a: 20 b6 fd  
             jsr __f596         ; $cb9d: 20 96 f5  
             inc vGameState            ; $cba0: e6 50     
             jmp __ff3b         ; $cba2: 4c 3b ff  
@@ -1721,10 +1764,10 @@ __cba5:     lda #$fb           ; $cba5: a9 fb
 __cbaa:     lda vCycleCounter            ; $cbaa: a5 09     
             and #$1f           ; $cbac: 29 1f     
             bne __cbb8         ; $cbae: d0 08     
-            lda vMainMemuCounter            ; $cbb0: a5 57     
+            lda vMainMenuCounter            ; $cbb0: a5 57     
             cmp #$08           ; $cbb2: c9 08     
             beq __cbbb         ; $cbb4: f0 05     
-__cbb6:     inc vMainMemuCounter            ; $cbb6: e6 57     
+__cbb6:     inc vMainMenuCounter            ; $cbb6: e6 57     
 __cbb8:     jmp __c122         ; $cbb8: 4c 22 c1  
 
 ;-------------------------------------------------------------------------------
@@ -1739,22 +1782,28 @@ __cbbb:     lda #$09           ; $cbbb: a9 09
             jmp __cbb6         ; $cbcc: 4c b6 cb  
 
 ;-------------------------------------------------------------------------------
-__cbcf:     inc vMainMemuCounter            ; $cbcf: e6 57     
-            jsr __c6a2         ; $cbd1: 20 a2 c6  
-            lda $08            ; $cbd4: a5 08     
+___initGameDemo:     
+			inc vMainMenuCounter            ; $cbcf: e6 57     
+            jsr __clearBirdNametable         ; $cbd1: 20 a2 c6  
+			
+			; select random level to start (exclude bonus levels)
+            lda vRandomVar            ; $cbd4: a5 08     
             and #$03           ; $cbd6: 29 03     
             tax                ; $cbd8: aa        
-__cbd9:     inx                ; $cbd9: e8        
+__demoLevelSelectLoop:     
+			inx                ; $cbd9: e8        
             cpx #$03           ; $cbda: e0 03     
-            beq __cbd9         ; $cbdc: f0 fb     
+            beq __demoLevelSelectLoop         ; $cbdc: f0 fb     
+			
             stx vCurrentLevel            ; $cbde: 86 55     
             lda #$01           ; $cbe0: a9 01     
-            sta $f2            ; $cbe2: 85 f2     
-            jsr __fe94         ; $cbe4: 20 94 fe  
-            jmp __c083         ; $cbe7: 4c 83 c0  
+            sta vRoundNumber            ; $cbe2: 85 f2     
+            jsr __hideAllSprites         ; $cbe4: 20 94 fe  
+            jmp __initGameLoop         ; $cbe7: 4c 83 c0  
 
 ;-------------------------------------------------------------------------------
-__cbea:     lda vMainMemuCounter            ; $cbea: a5 57     
+__cbea:     
+			lda vMainMenuCounter            ; $cbea: a5 57     
             cmp #$40           ; $cbec: c9 40     
             beq __cc2a         ; $cbee: f0 3a     
             lda vPlayerInput            ; $cbf0: a5 0a     
@@ -1762,7 +1811,7 @@ __cbea:     lda vMainMemuCounter            ; $cbea: a5 57
             bne __cc2a         ; $cbf4: d0 34     
             ldx $0271          ; $cbf6: ae 71 02  
             lda __cc23,x       ; $cbf9: bd 23 cc  
-            cmp vMainMemuCounter            ; $cbfc: c5 57     
+            cmp vMainMenuCounter            ; $cbfc: c5 57     
             beq __cc13         ; $cbfe: f0 13     
 __cc00:     ldx $0272          ; $cc00: ae 72 02  
             lda __cc1c,x       ; $cc03: bd 1c cc  
@@ -1770,7 +1819,7 @@ __cc00:     ldx $0272          ; $cc00: ae 72 02
             lda vCycleCounter            ; $cc08: a5 09     
             and #$1f           ; $cc0a: 29 1f     
             bne __cc10         ; $cc0c: d0 02     
-            inc vMainMemuCounter            ; $cc0e: e6 57     
+            inc vMainMenuCounter            ; $cc0e: e6 57     
 __cc10:     jmp __c0ac         ; $cc10: 4c ac c0  
 
 ;-------------------------------------------------------------------------------
@@ -1787,7 +1836,7 @@ __cc23:     .hex 24 28 30 32   ; $cc23: 24 28 30 32   Data
 ;-------------------------------------------------------------------------------
 __cc2a:     lda #$f0           ; $cc2a: a9 f0     
             sta $0760          ; $cc2c: 8d 60 07  
-            jsr __c6a2         ; $cc2f: 20 a2 c6  
+            jsr __clearBirdNametable         ; $cc2f: 20 a2 c6  
             jmp __f467         ; $cc32: 4c 67 f4  
 
 ;-------------------------------------------------------------------------------
@@ -1803,11 +1852,11 @@ __cc3b:     lda #$00           ; $cc3b: a9 00
             stx $d3            ; $cc48: 86 d3     
             jsr __c1d4         ; $cc4a: 20 d4 c1  
 __cc4d:     lda __c221,x       ; $cc4d: bd 21 c2  
-            sta $2007          ; $cc50: 8d 07 20  
+            sta ppuData          ; $cc50: 8d 07 20  
             inx                ; $cc53: e8        
             cpx #$08           ; $cc54: e0 08     
             bne __cc4d         ; $cc56: d0 f5     
-            jsr __fdb6         ; $cc58: 20 b6 fd  
+            jsr __scrollScreen         ; $cc58: 20 b6 fd  
             jmp __enableNMI         ; $cc5b: 4c c6 fe  
 
 ;-------------------------------------------------------------------------------
@@ -1851,10 +1900,10 @@ __cc97:     lda vCurrentLevel            ; $cc97: a5 55
             lda #$d2           ; $ccab: a9 d2     
             sta ppuAddress          ; $ccad: 8d 06 20  
             lda vStageSelect10s          ; $ccb0: ad e1 02  
-            sta $2007          ; $ccb3: 8d 07 20  
+            sta ppuData          ; $ccb3: 8d 07 20  
             lda vStageSelectOnes          ; $ccb6: ad e2 02  
-            sta $2007          ; $ccb9: 8d 07 20  
-            jsr __fdb6         ; $ccbc: 20 b6 fd  
+            sta ppuData          ; $ccb9: 8d 07 20  
+            jsr __scrollScreen         ; $ccbc: 20 b6 fd  
             lda vPlayerInput            ; $ccbf: a5 0a     
             and #$02           ; $ccc1: 29 02     
             bne __ccc6         ; $ccc3: d0 01     
@@ -1945,7 +1994,7 @@ __cd35:     lda #$00           ; $cd35: a9 00
             sta $072d          ; $cda8: 8d 2d 07  
             lda #$30           ; $cdab: a9 30     
             sta $0700          ; $cdad: 8d 00 07  
-            jsr __isBonusLevel         ; $cdb0: 20 5e c3  
+            jsr __levelModulo4         ; $cdb0: 20 5e c3  
             cpx #$03           ; $cdb3: e0 03     
             beq __cdba         ; $cdb5: f0 03     
             jsr __ce94         ; $cdb7: 20 94 ce  
@@ -1984,7 +2033,7 @@ __cdba:     lda vCurrentLevel            ; $cdba: a5 55
             sta $77            ; $ce04: 85 77     
             sta $80            ; $ce06: 85 80     
             sta $70            ; $ce08: 85 70     
-            jsr __isBonusLevel         ; $ce0a: 20 5e c3  
+            jsr __levelModulo4         ; $ce0a: 20 5e c3  
             lda __ce15,x       ; $ce0d: bd 15 ce  
             sta vWoodpeckerSquirrelX            ; $ce10: 85 7e     
             jmp __ce19         ; $ce12: 4c 19 ce  
@@ -2112,14 +2161,14 @@ __cf54:     ldy #$01           ; $cf54: a0 01
             lda #$3c           ; $cf56: a9 3c     
             sta vBirdOffsetX            ; $cf58: 85 5c     
             jsr __d186         ; $cf5a: 20 86 d1  
-            jsr __cfee         ; $cf5d: 20 ee cf  
+            jsr __isSeaBonusLevel         ; $cf5d: 20 ee cf  
             beq __cfa2         ; $cf60: f0 40     
             cmp #$07           ; $cf62: c9 07     
             beq __cfa2         ; $cf64: f0 3c     
             lda vBirdOffsetX            ; $cf66: a5 5c     
             and #$01           ; $cf68: 29 01     
             bne __cfa2         ; $cf6a: d0 36     
-            jsr __isBonusLevel         ; $cf6c: 20 5e c3  
+            jsr __levelModulo4         ; $cf6c: 20 5e c3  
             lda vCurrentLevel            ; $cf6f: a5 55     
             cmp #$10           ; $cf71: c9 10     
             bcs __cfbe         ; $cf73: b0 49     
@@ -2148,10 +2197,10 @@ __cfa2:     ldx #$00           ; $cfa2: a2 00
             stx $60            ; $cfab: 86 60     
             cmp #$c8           ; $cfad: c9 c8     
             bcs __cfdc         ; $cfaf: b0 2b     
-            stx $61            ; $cfb1: 86 61     
+            stx vIsBirdLanded            ; $cfb1: 86 61     
             cmp #$b8           ; $cfb3: c9 b8     
             bcs __cfe5         ; $cfb5: b0 2e     
-            stx $62            ; $cfb7: 86 62     
+            stx vIsBirdLanding            ; $cfb7: 86 62     
 __cfb9:     lda #$00           ; $cfb9: a9 00     
             sta $ab            ; $cfbb: 85 ab     
             rts                ; $cfbd: 60        
@@ -2172,26 +2221,27 @@ __cfcb:     lda vCurrentLevel            ; $cfcb: a5 55
             cmp #$20           ; $cfcd: c9 20     
             bcs __cfdc         ; $cfcf: b0 0b     
             lda #$00           ; $cfd1: a9 00     
-            sta $62            ; $cfd3: 85 62     
-            sty $61            ; $cfd5: 84 61     
+            sta vIsBirdLanding            ; $cfd3: 85 62     
+            sty vIsBirdLanded            ; $cfd5: 84 61     
             lda #$01           ; $cfd7: a9 01     
             sta $ab            ; $cfd9: 85 ab     
             rts                ; $cfdb: 60        
 
 ;-------------------------------------------------------------------------------
-__cfdc:     sty $61            ; $cfdc: 84 61     
+__cfdc:     sty vIsBirdLanded            ; $cfdc: 84 61     
             lda #$00           ; $cfde: a9 00     
-            sta $62            ; $cfe0: 85 62     
+            sta vIsBirdLanding            ; $cfe0: 85 62     
             jmp __cfb9         ; $cfe2: 4c b9 cf  
 
 ;-------------------------------------------------------------------------------
-__cfe5:     sty $62            ; $cfe5: 84 62     
+__cfe5:     sty vIsBirdLanding            ; $cfe5: 84 62     
             lda #$00           ; $cfe7: a9 00     
-            sta $61            ; $cfe9: 85 61     
+            sta vIsBirdLanded            ; $cfe9: 85 61     
             jmp __cfb9         ; $cfeb: 4c b9 cf  
 
 ;-------------------------------------------------------------------------------
-__cfee:     lda vCurrentLevel            ; $cfee: a5 55     
+__isSeaBonusLevel:     
+			lda vCurrentLevel            ; $cfee: a5 55     
             and #$07           ; $cff0: 29 07     
             cmp #$03           ; $cff2: c9 03     
             rts                ; $cff4: 60        
@@ -2204,12 +2254,12 @@ __cff5:     lda #$78           ; $cff5: a9 78
             bcc __d005         ; $cfff: 90 04     
             cmp #$ca           ; $d001: c9 ca     
             bcc __d00d         ; $d003: 90 08     
-__d005:     jsr __fe94         ; $d005: 20 94 fe  
+__d005:     jsr __hideAllSprites         ; $d005: 20 94 fe  
             lda #$30           ; $d008: a9 30     
             sta $0700          ; $d00a: 8d 00 07  
-__d00d:     jsr __cfee         ; $d00d: 20 ee cf  
+__d00d:     jsr __isSeaBonusLevel         ; $d00d: 20 ee cf  
             bne __d019         ; $d010: d0 07     
-            lda $61            ; $d012: a5 61     
+            lda vIsBirdLanded            ; $d012: a5 61     
             beq __d019         ; $d014: f0 03     
             jmp __d19d         ; $d016: 4c 9d d1  
 
@@ -2295,9 +2345,9 @@ __d097:     lsr                ; $d097: 4a
             rts                ; $d09a: 60        
 
 ;-------------------------------------------------------------------------------
-__d09b:     lda $61            ; $d09b: a5 61     
+__d09b:     lda vIsBirdLanded            ; $d09b: a5 61     
             bne __d0c5         ; $d09d: d0 26     
-            lda $62            ; $d09f: a5 62     
+            lda vIsBirdLanding            ; $d09f: a5 62     
             bne __d0d3         ; $d0a1: d0 30     
             inc $0700          ; $d0a3: ee 00 07  
             inc $0700          ; $d0a6: ee 00 07  
@@ -2346,7 +2396,7 @@ __d0ea:     jsr __d084         ; $d0ea: 20 84 d0
             rts                ; $d0f3: 60        
 
 ;-------------------------------------------------------------------------------
-__d0f4:     lda $61            ; $d0f4: a5 61     
+__d0f4:     lda vIsBirdLanded            ; $d0f4: a5 61     
             bne __d107         ; $d0f6: d0 0f     
             jsr __d08b         ; $d0f8: 20 8b d0  
             jsr __c83f         ; $d0fb: 20 3f c8  
@@ -2366,7 +2416,7 @@ __d107:     jsr __d08b         ; $d107: 20 8b d0
             rts                ; $d117: 60        
 
 ;-------------------------------------------------------------------------------
-__d118:     lda $61            ; $d118: a5 61     
+__d118:     lda vIsBirdLanded            ; $d118: a5 61     
             bne __d125         ; $d11a: d0 09     
             jsr __d08b         ; $d11c: 20 8b d0  
             jsr __d084         ; $d11f: 20 84 d0  
@@ -2384,9 +2434,9 @@ __d125:     jsr __d08b         ; $d125: 20 8b d0
             rts                ; $d135: 60        
 
 ;-------------------------------------------------------------------------------
-__d136:     lda $61            ; $d136: a5 61     
+__d136:     lda vIsBirdLanded            ; $d136: a5 61     
             bne __d15d         ; $d138: d0 23     
-            lda $62            ; $d13a: a5 62     
+            lda vIsBirdLanding            ; $d13a: a5 62     
             bne __d16b         ; $d13c: d0 2d     
             jsr __d08b         ; $d13e: 20 8b d0  
             lda vBirdIsRight            ; $d141: a5 5a     
@@ -2417,19 +2467,19 @@ __d166:     ldx #$15           ; $d166: a2 15
 __d16b:     jmp __d0d3         ; $d16b: 4c d3 d0  
 
 ;-------------------------------------------------------------------------------
-__d16e:     inc $03            ; $d16e: e6 03     
+__d16e:     inc vBirdPPUX            ; $d16e: e6 03     
             bne __d174         ; $d170: d0 02     
-            inc $02            ; $d172: e6 02     
-__d174:     lda $02            ; $d174: a5 02     
+            inc vBirdPPUNametable            ; $d172: e6 02     
+__d174:     lda vBirdPPUNametable            ; $d174: a5 02     
             and #$01           ; $d176: 29 01     
-            sta $02            ; $d178: 85 02     
+            sta vBirdPPUNametable            ; $d178: 85 02     
             rts                ; $d17a: 60        
 
 ;-------------------------------------------------------------------------------
-__d17b:     lda $03            ; $d17b: a5 03     
+__d17b:     lda vBirdPPUX            ; $d17b: a5 03     
             bne __d181         ; $d17d: d0 02     
-            dec $02            ; $d17f: c6 02     
-__d181:     dec $03            ; $d181: c6 03     
+            dec vBirdPPUNametable            ; $d17f: c6 02     
+__d181:     dec vBirdPPUX            ; $d181: c6 03     
             jmp __d174         ; $d183: 4c 74 d1  
 
 ;-------------------------------------------------------------------------------
@@ -2650,14 +2700,14 @@ __d3eb:     .hex 00 00 00 40   ; $d3eb: 00 00 00 40   Data
             .hex 03 43 43      ; $d487: 03 43 43      Data
 
 ;-------------------------------------------------------------------------------
-__d48a:     jsr __d716         ; $d48a: 20 16 d7  
+__d48a:     jsr __clearXY         ; $d48a: 20 16 d7  
 __d48d:     lda $70,x          ; $d48d: b5 70     
             sta vBirdOffsetX            ; $d48f: 85 5c     
             jsr __d4e5         ; $d491: 20 e5 d4  
             lda vBirdOffsetX            ; $d494: a5 5c     
             and #$01           ; $d496: 29 01     
             bne __d4cc         ; $d498: d0 32     
-            lda $03            ; $d49a: a5 03     
+            lda vBirdPPUX            ; $d49a: a5 03     
             and #$01           ; $d49c: 29 01     
             bne __d4a8         ; $d49e: d0 08     
             lda vBirdOffsetX            ; $d4a0: a5 5c     
@@ -2721,9 +2771,9 @@ __d4f7:     lda #$01           ; $d4f7: a9 01
             jmp __d4f4         ; $d4f9: 4c f4 d4  
 
 ;-------------------------------------------------------------------------------
-__d4fc:     lda $02            ; $d4fc: a5 02     
+__d4fc:     lda vBirdPPUNametable            ; $d4fc: a5 02     
             ror                ; $d4fe: 6a        
-            lda $03            ; $d4ff: a5 03     
+            lda vBirdPPUX            ; $d4ff: a5 03     
             ror                ; $d501: 6a        
             rts                ; $d502: 60        
 
@@ -2752,7 +2802,7 @@ __d51b:     sta $6b            ; $d51b: 85 6b
             bne __d53d         ; $d528: d0 13     
             lda $68            ; $d52a: a5 68     
             bne __d540         ; $d52c: d0 12     
-            lda $08            ; $d52e: a5 08     
+            lda vRandomVar            ; $d52e: a5 08     
             bne __d534         ; $d530: d0 02     
             inc $68            ; $d532: e6 68     
 __d534:     lda $6a            ; $d534: a5 6a     
@@ -2901,7 +2951,7 @@ __d630:     jsr __d662         ; $d630: 20 62 d6
             bcc __d649         ; $d639: 90 0e     
             cmp #$c8           ; $d63b: c9 c8     
             bcs __d649         ; $d63d: b0 0a     
-            lda $08            ; $d63f: a5 08     
+            lda vRandomVar            ; $d63f: a5 08     
             and #$01           ; $d641: 29 01     
             bne __d64a         ; $d643: d0 05     
             dec $98            ; $d645: c6 98     
@@ -2968,13 +3018,13 @@ __d696:     lda vCycleCounter            ; $d696: a5 09
 __d6aa:     rts                ; $d6aa: 60        
 
 ;-------------------------------------------------------------------------------
-__d6ab:     lda $17            ; $d6ab: a5 17     
+__d6ab:     lda vRandomVar2            ; $d6ab: a5 17     
             bne __d6ca         ; $d6ad: d0 1b     
             lda vCycleCounter            ; $d6af: a5 09     
             cmp #$40           ; $d6b1: c9 40     
             bcs __d6ca         ; $d6b3: b0 15     
             inc $de            ; $d6b5: e6 de     
-            lda $08            ; $d6b7: a5 08     
+            lda vRandomVar            ; $d6b7: a5 08     
             and #$07           ; $d6b9: 29 07     
             tay                ; $d6bb: a8        
             lda __d70e,y       ; $d6bc: b9 0e d7  
@@ -3021,12 +3071,12 @@ __d70e:     .hex 00 20 40 60   ; $d70e: 00 20 40 60   Data
             .hex 80 a0 c0 e0   ; $d712: 80 a0 c0 e0   Data
 
 ;-------------------------------------------------------------------------------
-__d716:     ldx #$00           ; $d716: a2 00     
+__clearXY:     ldx #$00           ; $d716: a2 00     
             ldy #$00           ; $d718: a0 00     
             rts                ; $d71a: 60        
 
 ;-------------------------------------------------------------------------------
-__d71b:     jsr __c22c         ; $d71b: 20 2c c2  
+__d71b:     jsr __mainMenuHandleStart         ; $d71b: 20 2c c2  
             jmp __c248         ; $d71e: 4c 48 c2  
 
 ;-------------------------------------------------------------------------------
@@ -3065,7 +3115,7 @@ __d754:     lda #$00           ; $d754: a9 00
             rts                ; $d761: 60        
 
 ;-------------------------------------------------------------------------------
-__d762:     jsr __d716         ; $d762: 20 16 d7  
+__d762:     jsr __clearXY         ; $d762: 20 16 d7  
 __d765:     lda __d789,x       ; $d765: bd 89 d7  
             sta $90,x          ; $d768: 95 90     
             lda __d793,x       ; $d76a: bd 93 d7  
@@ -3129,9 +3179,9 @@ __d7cc:     jsr __setPPUIncrementBy32         ; $d7cc: 20 e4 fe
             lda __d815,x       ; $d7e5: bd 15 d8  
             sta ppuAddress          ; $d7e8: 8d 06 20  
             lda #$b0           ; $d7eb: a9 b0     
-            sta $2007          ; $d7ed: 8d 07 20  
+            sta ppuData          ; $d7ed: 8d 07 20  
             lda #$b1           ; $d7f0: a9 b1     
-            sta $2007          ; $d7f2: 8d 07 20  
+            sta ppuData          ; $d7f2: 8d 07 20  
             lda #$23           ; $d7f5: a9 23     
             sta ppuAddress          ; $d7f7: 8d 06 20  
             lda __d815,x       ; $d7fa: bd 15 d8  
@@ -3139,11 +3189,11 @@ __d7cc:     jsr __setPPUIncrementBy32         ; $d7cc: 20 e4 fe
             iny                ; $d7fe: c8        
             sty ppuAddress          ; $d7ff: 8c 06 20  
             lda #$b2           ; $d802: a9 b2     
-            sta $2007          ; $d804: 8d 07 20  
+            sta ppuData          ; $d804: 8d 07 20  
             lda #$b3           ; $d807: a9 b3     
-            sta $2007          ; $d809: 8d 07 20  
+            sta ppuData          ; $d809: 8d 07 20  
             inc $02c2          ; $d80c: ee c2 02  
-            jsr __fdb6         ; $d80f: 20 b6 fd  
+            jsr __scrollScreen         ; $d80f: 20 b6 fd  
 __d812:     jmp __setPPUIncrementBy1         ; $d812: 4c da fe  
 
 ;-------------------------------------------------------------------------------
@@ -3193,7 +3243,7 @@ __d867:     lda __d1c2,x       ; $d867: bd c2 d1
             rts                ; $d874: 60        
 
 ;-------------------------------------------------------------------------------
-__d875:     jsr __d716         ; $d875: 20 16 d7  
+__d875:     jsr __clearXY         ; $d875: 20 16 d7  
 __d878:     lda $b0            ; $d878: a5 b0     
             beq __d899         ; $d87a: f0 1d     
             stx $1e            ; $d87c: 86 1e     
@@ -3217,7 +3267,7 @@ __d899:     rts                ; $d899: 60
 __d89a:     .hex 3a 3b 3a 3b   ; $d89a: 3a 3b 3a 3b   Data
 
 ;-------------------------------------------------------------------------------
-__d89e:     jsr __isBonusLevel         ; $d89e: 20 5e c3  
+__d89e:     jsr __levelModulo4         ; $d89e: 20 5e c3  
             cpx #$03           ; $d8a1: e0 03     
             beq __d901         ; $d8a3: f0 5c     
             ldx #$00           ; $d8a5: a2 00     
@@ -3532,10 +3582,10 @@ __dac3:     lda #$00           ; $dac3: a9 00
             sta $da,x          ; $dac5: 95 da     
             lda #$d3           ; $dac7: a9 d3     
             sta $93,x          ; $dac9: 95 93     
-            lda $17            ; $dacb: a5 17     
+            lda vRandomVar2            ; $dacb: a5 17     
             and #$01           ; $dacd: 29 01     
             bne __dae3         ; $dacf: d0 12     
-            lda $08            ; $dad1: a5 08     
+            lda vRandomVar            ; $dad1: a5 08     
             and #$03           ; $dad3: 29 03     
             beq __daf3         ; $dad5: f0 1c     
             cmp #$01           ; $dad7: c9 01     
@@ -3634,7 +3684,7 @@ __db71:     lda #$01           ; $db71: a9 01
             jmp __db7c         ; $db79: 4c 7c db  
 
 ;-------------------------------------------------------------------------------
-__db7c:     lda $08            ; $db7c: a5 08     
+__db7c:     lda vRandomVar            ; $db7c: a5 08     
             and #$03           ; $db7e: 29 03     
             beq __db91         ; $db80: f0 0f     
             cmp #$01           ; $db82: c9 01     
@@ -3726,7 +3776,7 @@ __dc8c:     lda $0210,x        ; $dc8c: bd 10 02
 __dc91:     inx                ; $dc91: e8        
             cpx #$06           ; $dc92: e0 06     
             bne __dc8c         ; $dc94: d0 f6     
-            lda $61            ; $dc96: a5 61     
+            lda vIsBirdLanded            ; $dc96: a5 61     
             bne __dcc9         ; $dc98: d0 2f     
             lda $ba            ; $dc9a: a5 ba     
             bne __dcd0         ; $dc9c: d0 32     
@@ -3778,7 +3828,7 @@ __dcdc:     jsr __d4fc         ; $dcdc: 20 fc d4
             rts                ; $dce4: 60        
 
 ;-------------------------------------------------------------------------------
-__dce5:     jsr __isBonusLevel         ; $dce5: 20 5e c3  
+__dce5:     jsr __levelModulo4         ; $dce5: 20 5e c3  
             cpx #$02           ; $dce8: e0 02     
             bne __dd1b         ; $dcea: d0 2f     
             ldy $0261          ; $dcec: ac 61 02  
@@ -3864,7 +3914,7 @@ __dd65:     lda #$00           ; $dd65: a9 00
 __dd6f:     lda $9e            ; $dd6f: a5 9e     
             cmp #$a0           ; $dd71: c9 a0     
             bcs __dd79         ; $dd73: b0 04     
-            lda $08            ; $dd75: a5 08     
+            lda vRandomVar            ; $dd75: a5 08     
             beq __dd91         ; $dd77: f0 18     
 __dd79:     jsr __d65d         ; $dd79: 20 5d d6  
             bne __ddb3         ; $dd7c: d0 35     
@@ -3921,7 +3971,7 @@ __ddd0:     jsr __d08b         ; $ddd0: 20 8b d0
 __dddc:     .hex 7c 7a 7d 7a   ; $dddc: 7c 7a 7d 7a   Data
 
 ;-------------------------------------------------------------------------------
-__dde0:     jsr __isBonusLevel         ; $dde0: 20 5e c3  
+__dde0:     jsr __levelModulo4         ; $dde0: 20 5e c3  
             cpx #$01           ; $dde3: e0 01     
             beq __ddf4         ; $dde5: f0 0d     
             lda vCurrentLevel            ; $dde7: a5 55     
@@ -3974,7 +4024,7 @@ __de25:     lda #$91           ; $de25: a9 91
 __de3d:     rts                ; $de3d: 60        
 
 ;-------------------------------------------------------------------------------
-__de3e:     lda $08            ; $de3e: a5 08     
+__de3e:     lda vRandomVar            ; $de3e: a5 08     
             and #$03           ; $de40: 29 03     
             beq __de59         ; $de42: f0 15     
             lda vFoxX            ; $de44: a5 7b     
@@ -4314,12 +4364,12 @@ ___initGame:
             jsr __e18a         ; $e16d: 20 8a e1  
             jsr __e231         ; $e170: 20 31 e2  
             jsr __e1fc         ; $e173: 20 fc e1  
-            jsr __fe94         ; $e176: 20 94 fe  
+            jsr __hideAllSprites         ; $e176: 20 94 fe  
             jsr __e25a         ; $e179: 20 5a e2  
             jsr __e265         ; $e17c: 20 65 e2  
             jsr __ff3b         ; $e17f: 20 3b ff  
             inc vGameState            ; $e182: e6 50     
-            jsr __fdb6         ; $e184: 20 b6 fd  
+            jsr __scrollScreen         ; $e184: 20 b6 fd  
             jmp __enableNMI         ; $e187: 4c c6 fe  
 
 ;-------------------------------------------------------------------------------
@@ -4329,7 +4379,7 @@ __e18a:     ldx #$00           ; $e18a: a2 00
             lda #$cd           ; $e191: a9 cd     
             sta ppuAddress          ; $e193: 8d 06 20  
 __e196:     lda __e1d0,x       ; $e196: bd d0 e1  
-            sta $2007          ; $e199: 8d 07 20  
+            sta ppuData          ; $e199: 8d 07 20  
             inx                ; $e19c: e8        
             cpx #$0a           ; $e19d: e0 0a     
             bne __e196         ; $e19f: d0 f5     
@@ -4339,7 +4389,7 @@ __e196:     lda __e1d0,x       ; $e196: bd d0 e1
             lda #$8d           ; $e1a8: a9 8d     
             sta ppuAddress          ; $e1aa: 8d 06 20  
 __e1ad:     lda __e1da,x       ; $e1ad: bd da e1  
-            sta $2007          ; $e1b0: 8d 07 20  
+            sta ppuData          ; $e1b0: 8d 07 20  
             inx                ; $e1b3: e8        
             cpx #$0a           ; $e1b4: e0 0a     
             bne __e1ad         ; $e1b6: d0 f5     
@@ -4349,7 +4399,7 @@ __e1ad:     lda __e1da,x       ; $e1ad: bd da e1
             lda #$24           ; $e1bf: a9 24     
             sta ppuAddress          ; $e1c1: 8d 06 20  
 __e1c4:     lda __e1e4,x       ; $e1c4: bd e4 e1  
-            sta $2007          ; $e1c7: 8d 07 20  
+            sta ppuData          ; $e1c7: 8d 07 20  
             inx                ; $e1ca: e8        
             cpx #$18           ; $e1cb: e0 18     
             bne __e1c4         ; $e1cd: d0 f5     
@@ -4376,23 +4426,23 @@ __e1fc:     lda #$20           ; $e1fc: a9 20
             sta ppuAddress          ; $e203: 8d 06 20  
             ldy #$00           ; $e206: a0 00     
 __e208:     lda __e275,y       ; $e208: b9 75 e2  
-            sta $2007          ; $e20b: 8d 07 20  
+            sta ppuData          ; $e20b: 8d 07 20  
             iny                ; $e20e: c8        
             cpy #$07           ; $e20f: c0 07     
             bne __e208         ; $e211: d0 f5     
 __e213:     lda $0110,y        ; $e213: b9 10 01  
             bne __e226         ; $e216: d0 0e     
             lda #$24           ; $e218: a9 24     
-            sta $2007          ; $e21a: 8d 07 20  
+            sta ppuData          ; $e21a: 8d 07 20  
             dey                ; $e21d: 88        
             bne __e213         ; $e21e: d0 f3     
 __e220:     lda #$00           ; $e220: a9 00     
-            sta $2007          ; $e222: 8d 07 20  
+            sta ppuData          ; $e222: 8d 07 20  
             rts                ; $e225: 60        
 
 ;-------------------------------------------------------------------------------
 __e226:     lda $0110,y        ; $e226: b9 10 01  
-            sta $2007          ; $e229: 8d 07 20  
+            sta ppuData          ; $e229: 8d 07 20  
             dey                ; $e22c: 88        
             bne __e226         ; $e22d: d0 f7     
             beq __e220         ; $e22f: f0 ef     
@@ -4402,7 +4452,7 @@ __e231:     lda #$23           ; $e231: a9 23
             sty ppuAddress          ; $e238: 8c 06 20  
             lda #$55           ; $e23b: a9 55     
             ldx #$00           ; $e23d: a2 00     
-__e23f:     sta $2007          ; $e23f: 8d 07 20  
+__e23f:     sta ppuData          ; $e23f: 8d 07 20  
             inx                ; $e242: e8        
             cpx #$08           ; $e243: e0 08     
             bne __e23f         ; $e245: d0 f8     
@@ -4410,7 +4460,7 @@ __e23f:     sta $2007          ; $e23f: 8d 07 20
             sta ppuAddress          ; $e249: 8d 06 20  
             sty ppuAddress          ; $e24c: 8c 06 20  
             lda #$55           ; $e24f: a9 55     
-__e251:     sta $2007          ; $e251: 8d 07 20  
+__e251:     sta ppuData          ; $e251: 8d 07 20  
             inx                ; $e254: e8        
             cpx #$10           ; $e255: e0 10     
             bne __e251         ; $e257: d0 f8     
@@ -4438,10 +4488,11 @@ __e275:     .hex 11 12 1c 0c   ; $e275: 11 12 1c 0c   Data
             .hex 18 1b 0e      ; $e279: 18 1b 0e      Data
 
 ;-------------------------------------------------------------------------------
-__e27c:     jsr __disableNMI         ; $e27c: 20 d0 fe  
+___initGameLoop:     
+			jsr __disableNMI         ; $e27c: 20 d0 fe  
             jsr __disableDrawing         ; $e27f: 20 ee fe  
             jsr __setPPUIncrementBy1         ; $e282: 20 da fe  
-            jsr __e3aa         ; $e285: 20 aa e3  
+            jsr __loadLevelData         ; $e285: 20 aa e3  
             jsr __fe64         ; $e288: 20 64 fe  
             jsr __e4ca         ; $e28b: 20 ca e4  
             lda vCurrentLevel            ; $e28e: a5 55     
@@ -4460,13 +4511,13 @@ __e27c:     jsr __disableNMI         ; $e27c: 20 d0 fe
             jsr __e2b6         ; $e2a7: 20 b6 e2  
             jsr __e47e         ; $e2aa: 20 7e e4  
             jsr __e44a         ; $e2ad: 20 4a e4  
-            jsr __fdb6         ; $e2b0: 20 b6 fd  
+            jsr __scrollScreen         ; $e2b0: 20 b6 fd  
             jmp __c086         ; $e2b3: 4c 86 c0  
 
 ;-------------------------------------------------------------------------------
 __e2b6:     jsr __e2d4         ; $e2b6: 20 d4 e2  
             ldx #$00           ; $e2b9: a2 00     
-            stx $53            ; $e2bb: 86 53     
+            stx vDataAddress            ; $e2bb: 86 53     
             stx $51            ; $e2bd: 86 51     
             jsr __e301         ; $e2bf: 20 01 e3  
             jsr __e301         ; $e2c2: 20 01 e3  
@@ -4477,7 +4528,7 @@ __e2b6:     jsr __e2d4         ; $e2b6: 20 d4 e2
             jmp __e367         ; $e2d1: 4c 67 e3  
 
 ;-------------------------------------------------------------------------------
-__e2d4:     stx $54            ; $e2d4: 86 54     
+__e2d4:     stx vDataAddressHi            ; $e2d4: 86 54     
             stx ppuAddress          ; $e2d6: 8e 06 20  
             ldx #$80           ; $e2d9: a2 80     
             stx ppuAddress          ; $e2db: 8e 06 20  
@@ -4511,7 +4562,7 @@ __e301:     jsr __e321         ; $e301: 20 21 e3
             ldx #$0c           ; $e317: a2 0c     
             jsr __e351         ; $e319: 20 51 e3  
             ldx #$00           ; $e31c: a2 00     
-            stx $53            ; $e31e: 86 53     
+            stx vDataAddress            ; $e31e: 86 53     
             rts                ; $e320: 60        
 
 ;-------------------------------------------------------------------------------
@@ -4528,7 +4579,7 @@ __e321:     ldy $51            ; $e321: a4 51
             jsr __e386         ; $e339: 20 86 e3  
             iny                ; $e33c: c8        
             sty $51            ; $e33d: 84 51     
-            ldx $53            ; $e33f: a6 53     
+            ldx vDataAddress            ; $e33f: a6 53     
             ldy #$00           ; $e341: a0 00     
 __e343:     lda ($1e),y        ; $e343: b1 1e     
             sta $0400,x        ; $e345: 9d 00 04  
@@ -4536,12 +4587,12 @@ __e343:     lda ($1e),y        ; $e343: b1 1e
             iny                ; $e349: c8        
             cpy #$10           ; $e34a: c0 10     
             bne __e343         ; $e34c: d0 f5     
-            stx $53            ; $e34e: 86 53     
+            stx vDataAddress            ; $e34e: 86 53     
             rts                ; $e350: 60        
 
 ;-------------------------------------------------------------------------------
 __e351:     lda $0400,x        ; $e351: bd 00 04  
-            sta $2007          ; $e354: 8d 07 20  
+            sta ppuData          ; $e354: 8d 07 20  
             inx                ; $e357: e8        
             txa                ; $e358: 8a        
             and #$03           ; $e359: 29 03     
@@ -4555,7 +4606,7 @@ __e351:     lda $0400,x        ; $e351: bd 00 04
             rts                ; $e366: 60        
 
 ;-------------------------------------------------------------------------------
-__e367:     lda $54            ; $e367: a5 54     
+__e367:     lda vDataAddressHi            ; $e367: a5 54     
             clc                ; $e369: 18        
             adc #$03           ; $e36a: 69 03     
             sta ppuAddress          ; $e36c: 8d 06 20  
@@ -4565,7 +4616,7 @@ __e367:     lda $54            ; $e367: a5 54
 __e376:     lda $0300,y        ; $e376: b9 00 03  
             tax                ; $e379: aa        
             lda __e893,x       ; $e37a: bd 93 e8  
-            sta $2007          ; $e37d: 8d 07 20  
+            sta ppuData          ; $e37d: 8d 07 20  
             iny                ; $e380: c8        
             cpy #$30           ; $e381: c0 30     
             bne __e376         ; $e383: d0 f1     
@@ -4597,20 +4648,24 @@ __e3a1:     ror                ; $e3a1: 6a
             rts                ; $e3a9: 60        
 
 ;-------------------------------------------------------------------------------
-__e3aa:     lda vCurrentLevel            ; $e3aa: a5 55     
+__loadLevelData:     
+			lda vCurrentLevel            ; $e3aa: a5 55     
             and #$07           ; $e3ac: 29 07     
             asl                ; $e3ae: 0a        
-            tax                ; $e3af: aa        
+            tax                ; $e3af: aa      
+			
 __e3b0:     lda __e3c7,x       ; $e3b0: bd c7 e3  
-            sta $53            ; $e3b3: 85 53     
+            sta vDataAddress            ; $e3b3: 85 53     
             lda __e3c8,x       ; $e3b5: bd c8 e3  
-            sta $54            ; $e3b8: 85 54     
+            sta vDataAddressHi            ; $e3b8: 85 54     
             ldy #$00           ; $e3ba: a0 00     
-__e3bc:     lda ($53),y        ; $e3bc: b1 53     
-            sta $0030,y        ; $e3be: 99 30 00  
+
+__loadLevelDataLoop:     
+			lda ($53),y        ; $e3bc: b1 53     
+            sta vLevelDataAbs,y        ; $e3be: 99 30 00  
             iny                ; $e3c1: c8        
             cpy #$20           ; $e3c2: c0 20     
-            bne __e3bc         ; $e3c4: d0 f6     
+            bne __loadLevelDataLoop         ; $e3c4: d0 f6     
             rts                ; $e3c6: 60        
 
 ;-------------------------------------------------------------------------------
@@ -4630,7 +4685,7 @@ __e3da:
             beq __e418         ; $e3e3: f0 33     
 __e3e5:     jsr __disableNMI         ; $e3e5: 20 d0 fe  
             jsr __disableDrawing         ; $e3e8: 20 ee fe  
-            jsr __fe94         ; $e3eb: 20 94 fe  
+            jsr __hideAllSprites         ; $e3eb: 20 94 fe  
             jsr __setPPUIncrementBy1         ; $e3ee: 20 da fe  
             ldx #$0a           ; $e3f1: a2 0a     
             jsr __e3b0         ; $e3f3: 20 b0 e3  
@@ -4644,12 +4699,12 @@ __e3e5:     jsr __disableNMI         ; $e3e5: 20 d0 fe
             lda #$f0           ; $e408: a9 f0     
             sta $0600          ; $e40a: 8d 00 06  
             inc $d3            ; $e40d: e6 d3     
-            jsr __fdb6         ; $e40f: 20 b6 fd  
+            jsr __scrollScreen         ; $e40f: 20 b6 fd  
             jsr __ff3b         ; $e412: 20 3b ff  
             jmp __enableNMI         ; $e415: 4c c6 fe  
 
 ;-------------------------------------------------------------------------------
-__e418:     lda $f2            ; $e418: a5 f2     
+__e418:     lda vRoundNumber            ; $e418: a5 f2     
             cmp #$01           ; $e41a: c9 01     
             beq __e3e5         ; $e41c: f0 c7     
             lda #$20           ; $e41e: a9 20     
@@ -4658,7 +4713,7 @@ __e418:     lda $f2            ; $e418: a5 f2
             sta ppuAddress          ; $e425: 8d 06 20  
             ldx #$00           ; $e428: a2 00     
             ldy #$24           ; $e42a: a0 24     
-__e42c:     sty $2007          ; $e42c: 8c 07 20  
+__e42c:     sty ppuData          ; $e42c: 8c 07 20  
             inx                ; $e42f: e8        
             cpx #$10           ; $e430: e0 10     
             bne __e42c         ; $e432: d0 f8     
@@ -4666,11 +4721,11 @@ __e42c:     sty $2007          ; $e42c: 8c 07 20
             sta ppuAddress          ; $e436: 8d 06 20  
             lda #$08           ; $e439: a9 08     
             sta ppuAddress          ; $e43b: 8d 06 20  
-__e43e:     sty $2007          ; $e43e: 8c 07 20  
+__e43e:     sty ppuData          ; $e43e: 8c 07 20  
             inx                ; $e441: e8        
             cpx #$20           ; $e442: e0 20     
             bne __e43e         ; $e444: d0 f8     
-            jsr __fdb6         ; $e446: 20 b6 fd  
+            jsr __scrollScreen         ; $e446: 20 b6 fd  
             rts                ; $e449: 60        
 
 ;-------------------------------------------------------------------------------
@@ -4696,7 +4751,7 @@ __e46e:     ldy #$7d           ; $e46e: a0 7d
 
 ;-------------------------------------------------------------------------------
 __e473:     ldx #$00           ; $e473: a2 00     
-__e475:     sty $2007          ; $e475: 8c 07 20  
+__e475:     sty ppuData          ; $e475: 8c 07 20  
             inx                ; $e478: e8        
             cpx #$40           ; $e479: e0 40     
             bne __e475         ; $e47b: d0 f8     
@@ -4722,7 +4777,7 @@ __e47e:     lda vCurrentLevel            ; $e47e: a5 55
             cmp #$10           ; $e49e: c9 10     
             bcs __e4ae         ; $e4a0: b0 0c     
 __e4a2:     lda __e4c0,x       ; $e4a2: bd c0 e4  
-            sta $2007          ; $e4a5: 8d 07 20  
+            sta ppuData          ; $e4a5: 8d 07 20  
             inx                ; $e4a8: e8        
             cpx #$04           ; $e4a9: e0 04     
             bne __e4a2         ; $e4ab: d0 f5     
@@ -4730,7 +4785,7 @@ __e4ad:     rts                ; $e4ad: 60
 
 ;-------------------------------------------------------------------------------
 __e4ae:     lda __e4c4,x       ; $e4ae: bd c4 e4  
-            sta $2007          ; $e4b1: 8d 07 20  
+            sta ppuData          ; $e4b1: 8d 07 20  
             inx                ; $e4b4: e8        
             cpx #$06           ; $e4b5: e0 06     
             bne __e4ae         ; $e4b7: d0 f5     
@@ -4750,7 +4805,7 @@ __e4ca:     lda #$20           ; $e4ca: a9 20
             sta ppuAddress          ; $e4d1: 8d 06 20  
             ldx #$00           ; $e4d4: a2 00     
             lda #$24           ; $e4d6: a9 24     
-__e4d8:     sta $2007          ; $e4d8: 8d 07 20  
+__e4d8:     sta ppuData          ; $e4d8: 8d 07 20  
             inx                ; $e4db: e8        
             cpx #$14           ; $e4dc: e0 14     
             bne __e4d8         ; $e4de: d0 f8     
@@ -5401,7 +5456,7 @@ __ee98:     lda vCycleCounter            ; $ee98: a5 09
             and #$80           ; $ee9a: 29 80     
             sta $89            ; $ee9c: 85 89     
             inc $89            ; $ee9e: e6 89     
-            jsr __isBonusLevel         ; $eea0: 20 5e c3  
+            jsr __levelModulo4         ; $eea0: 20 5e c3  
             lda __ef5b,x       ; $eea3: bd 5b ef  
             sta $7f            ; $eea6: 85 7f     
             lda __ef5e,x       ; $eea8: bd 5e ef  
@@ -5617,7 +5672,7 @@ __f005:     lda vCurrentLevel            ; $f005: a5 55
             lda $0700          ; $f029: ad 00 07  
             cmp $a0            ; $f02c: c5 a0     
             bcc __f04d         ; $f02e: 90 1d     
-            lda $17            ; $f030: a5 17     
+            lda vRandomVar2            ; $f030: a5 17     
             cmp #$05           ; $f032: c9 05     
             bne __f04d         ; $f034: d0 17     
             lda #$00           ; $f036: a9 00     
@@ -5744,7 +5799,7 @@ __f105:     .hex 92 94 92 94   ; $f105: 92 94 92 94   Data
 __f109:     .hex 93 95 93 95   ; $f109: 93 95 93 95   Data
 
 ;-------------------------------------------------------------------------------
-__f10d:     jsr __isBonusLevel         ; $f10d: 20 5e c3  
+__f10d:     jsr __levelModulo4         ; $f10d: 20 5e c3  
             cpx #$03           ; $f110: e0 03     
             beq __f146         ; $f112: f0 32     
             jsr __f11a         ; $f114: 20 1a f1  
@@ -5813,7 +5868,7 @@ __f197:     jsr __ff15         ; $f197: 20 15 ff
             jmp __f16d         ; $f19a: 4c 6d f1  
 
 ;-------------------------------------------------------------------------------
-__f19d:     jsr __isBonusLevel         ; $f19d: 20 5e c3  
+__f19d:     jsr __levelModulo4         ; $f19d: 20 5e c3  
             cpx #$03           ; $f1a0: e0 03     
             bne __f1a5         ; $f1a2: d0 01     
             rts                ; $f1a4: 60        
@@ -5831,7 +5886,7 @@ __f1b1:     lda $a6            ; $f1b1: a5 a6
             beq __f1d2         ; $f1b7: f0 19     
             lda $a5            ; $f1b9: a5 a5     
             bne __f1d2         ; $f1bb: d0 15     
-            lda $08            ; $f1bd: a5 08     
+            lda vRandomVar            ; $f1bd: a5 08     
             and #$07           ; $f1bf: 29 07     
             tax                ; $f1c1: aa        
             lda __f1d3,x       ; $f1c2: bd d3 f1  
@@ -6060,7 +6115,7 @@ __f353:     jsr __d08b         ; $f353: 20 8b d0
             jmp __f2a8         ; $f359: 4c a8 f2  
 
 ;-------------------------------------------------------------------------------
-__f35c:     lda $17            ; $f35c: a5 17     
+__f35c:     lda vRandomVar2            ; $f35c: a5 17     
             bne __f383         ; $f35e: d0 23     
             lda vCycleCounter            ; $f360: a5 09     
             cmp #$80           ; $f362: c9 80     
@@ -6210,7 +6265,7 @@ __f467:     lda vPlayMainMenuMusic          ; $f467: ad 73 02
             bne __f4b2         ; $f46e: d0 42     
             lda vBirdLives            ; $f470: a5 56     
             bne __f49b         ; $f472: d0 27     
-__f474:     jsr __c6a2         ; $f474: 20 a2 c6  
+__f474:     jsr __clearBirdNametable         ; $f474: 20 a2 c6  
             sta $e9            ; $f477: 85 e9     
             tax                ; $f479: aa        
             lda #$21           ; $f47a: a9 21     
@@ -6218,7 +6273,7 @@ __f474:     jsr __c6a2         ; $f474: 20 a2 c6
             lda #$2c           ; $f47f: a9 2c     
             sta ppuAddress          ; $f481: 8d 06 20  
 __f484:     lda __f4a9,x       ; $f484: bd a9 f4  
-            sta $2007          ; $f487: 8d 07 20  
+            sta ppuData          ; $f487: 8d 07 20  
             inx                ; $f48a: e8        
             cpx #$09           ; $f48b: e0 09     
             bne __f484         ; $f48d: d0 f5     
@@ -6328,13 +6383,13 @@ __f549:     lda #$00           ; $f549: a9 00
             sta vStageSelect10s          ; $f554: 8d e1 02  
             sta vStageSelectOnes          ; $f557: 8d e2 02  
             tax                ; $f55a: aa        
-__f55b:     sta $53,x          ; $f55b: 95 53     
+__f55b:     sta vDataAddress,x          ; $f55b: 95 53     
             sta $0200,x        ; $f55d: 9d 00 02  
             inx                ; $f560: e8        
             cpx #$ad           ; $f561: e0 ad     
             bne __f55b         ; $f563: d0 f6     
             inc vGameState            ; $f565: e6 50     
-            jsr __fe94         ; $f567: 20 94 fe  
+            jsr __hideAllSprites         ; $f567: 20 94 fe  
             jsr __ce94         ; $f56a: 20 94 ce  
             jmp __c122         ; $f56d: 4c 22 c1  
 
@@ -6367,7 +6422,7 @@ __f599:     sta $0100,x        ; $f599: 9d 00 01
             rts                ; $f5a1: 60        
 
 ;-------------------------------------------------------------------------------
-__f5a2:     lda $53            ; $f5a2: a5 53     
+__f5a2:     lda vDataAddress            ; $f5a2: a5 53     
             beq __f5b2         ; $f5a4: f0 0c     
             lda vPlayerInput            ; $f5a6: a5 0a     
             and #$0c           ; $f5a8: 29 0c     
@@ -6377,7 +6432,7 @@ __f5a2:     lda $53            ; $f5a2: a5 53
             beq __f5bb         ; $f5b0: f0 09     
 __f5b2:     lda #$0b           ; $f5b2: a9 0b     
             sta $20            ; $f5b4: 85 20     
-            inc $53            ; $f5b6: e6 53     
+            inc vDataAddress            ; $f5b6: e6 53     
 __f5b8:     jmp __c122         ; $f5b8: 4c 22 c1  
 
 ;-------------------------------------------------------------------------------
@@ -6394,7 +6449,7 @@ __f5c5:     lda __c000,x       ; $f5c5: bd 00 c0
             jsr __fe64         ; $f5cf: 20 64 fe  
             lda #$20           ; $f5d2: a9 20     
             jsr __fdf5         ; $f5d4: 20 f5 fd  
-            jsr __fdb6         ; $f5d7: 20 b6 fd  
+            jsr __scrollScreen         ; $f5d7: 20 b6 fd  
             jsr __e25a         ; $f5da: 20 5a e2  
             jsr __showSprites         ; $f5dd: 20 e0 fd  
             lda #$f0           ; $f5e0: a9 f0     
@@ -6409,8 +6464,8 @@ __f5e8:     lda vCurrentLevel            ; $f5e8: a5 55
             lda vPPUController            ; $f5f0: a5 06     
             and #$fc           ; $f5f2: 29 fc     
             sta ppuControl          ; $f5f4: 8d 00 20  
-            stx $2005          ; $f5f7: 8e 05 20  
-            stx $2005          ; $f5fa: 8e 05 20  
+            stx ppuScroll          ; $f5f7: 8e 05 20  
+            stx ppuScroll          ; $f5fa: 8e 05 20  
 __f5fd:     nop                ; $f5fd: ea        
             dex                ; $f5fe: ca        
             bne __f5fd         ; $f5ff: d0 fc     
@@ -6420,12 +6475,12 @@ __f601:     lda ppuStatus          ; $f601: ad 02 20
 __f608:     dex                ; $f608: ca        
             cpx #$91           ; $f609: e0 91     
             bne __f608         ; $f60b: d0 fb     
-            jmp __fdb6         ; $f60d: 4c b6 fd  
+            jmp __scrollScreen         ; $f60d: 4c b6 fd  
 
 ;-------------------------------------------------------------------------------
 __f610:     lda #$f0           ; $f610: a9 f0     
             sta $0600          ; $f612: 8d 00 06  
-            jmp __fdb6         ; $f615: 4c b6 fd  
+            jmp __scrollScreen         ; $f615: 4c b6 fd  
 
 ;-------------------------------------------------------------------------------
 __f618:     lda #$fc           ; $f618: a9 fc     
@@ -6439,7 +6494,7 @@ __f618:     lda #$fc           ; $f618: a9 fc
             rts                ; $f62c: 60        
 
 ;-------------------------------------------------------------------------------
-__f62d:     jsr __isBonusLevel         ; $f62d: 20 5e c3  
+__f62d:     jsr __levelModulo4         ; $f62d: 20 5e c3  
             cpx #$03           ; $f630: e0 03     
             beq __f64e         ; $f632: f0 1a     
             lda vCurrentLevel            ; $f634: a5 55     
@@ -6452,7 +6507,7 @@ __f62d:     jsr __isBonusLevel         ; $f62d: 20 5e c3
             lda __c229,x       ; $f642: bd 29 c2  
             sta ppuAddress          ; $f645: 8d 06 20  
             lda __f64f,x       ; $f648: bd 4f f6  
-            sta $2007          ; $f64b: 8d 07 20  
+            sta ppuData          ; $f64b: 8d 07 20  
 __f64e:     rts                ; $f64e: 60        
 
 ;-------------------------------------------------------------------------------
@@ -6722,7 +6777,7 @@ __f7fb:     .hex 1b 01 fc 01   ; $f7fb: 1b 01 fc 01   Data
 __f83a:     lda #$0f           ; $f83a: a9 0f     
             sta $4015          ; $f83c: 8d 15 40  
             lda #$c0           ; $f83f: a9 c0     
-            sta $4017          ; $f841: 8d 17 40  
+            sta joy2port          ; $f841: 8d 17 40  
             lda #$0f           ; $f844: a9 0f     
             sta $4000          ; $f846: 8d 00 40  
             sta $4004          ; $f849: 8d 04 40  
@@ -7096,12 +7151,15 @@ __fd60:     lda __c021         ; $fd60: ad 21 c0
             lda vPPUController            ; $fd76: a5 06     
             ora #$80           ; $fd78: 09 80     
             sta vPPUController            ; $fd7a: 85 06     
-            sta ppuControl          ; $fd7c: 8d 00 20  
-__fd7f:     inc $08            ; $fd7f: e6 08     
-            inc $08            ; $fd81: e6 08     
-            inc $17            ; $fd83: e6 17     
-            inc $08            ; $fd85: e6 08     
-            jmp __fd7f         ; $fd87: 4c 7f fd  
+            sta ppuControl          ; $fd7c: 8d 00 20 
+			
+			; this will loop until NMI will be generated
+__foreverLoop:     
+			inc vRandomVar            ; $fd7f: e6 08     
+            inc vRandomVar            ; $fd81: e6 08     
+            inc vRandomVar2            ; $fd83: e6 17     
+            inc vRandomVar            ; $fd85: e6 08     
+            jmp __foreverLoop         ; $fd87: 4c 7f fd  
 
 ;-------------------------------------------------------------------------------
 ; nmi vector
@@ -7119,8 +7177,8 @@ nmi:
             sta ppuMask          ; $fd96: 8d 01 20  
 			
             lda ppuStatus          ; $fd99: ad 02 20  
-            jsr __ChooseGameState         ; $fd9c: 20 33 c0  
-            jsr __fea2         ; $fd9f: 20 a2 fe  
+            jsr __processGameState         ; $fd9c: 20 33 c0  
+            jsr __getControllerInput         ; $fd9f: 20 a2 fe  
             rti                ; $fda2: 40        
 
 ;-------------------------------------------------------------------------------
@@ -7128,28 +7186,32 @@ __fda3:     lda #$1f           ; $fda3: a9 1f
             sta ppuAddress          ; $fda5: 8d 06 20  
             lda #$f0           ; $fda8: a9 f0     
             sta ppuAddress          ; $fdaa: 8d 06 20  
-            lda $2007          ; $fdad: ad 07 20  
-            lda $2007          ; $fdb0: ad 07 20  
+            lda ppuData          ; $fdad: ad 07 20  
+            lda ppuData          ; $fdb0: ad 07 20  
             cmp #$0c           ; $fdb3: c9 0c     
             rts                ; $fdb5: 60        
 
 ;-------------------------------------------------------------------------------
-__fdb6:     lda vPPUController            ; $fdb6: a5 06     
+__scrollScreen:     
+			lda vPPUController            ; $fdb6: a5 06     
             and #$fc           ; $fdb8: 29 fc     
             tax                ; $fdba: aa        
-            lda $02            ; $fdbb: a5 02     
+            lda vBirdPPUNametable            ; $fdbb: a5 02     
             beq __fdc0         ; $fdbd: f0 01     
             inx                ; $fdbf: e8        
 __fdc0:     lda $04            ; $fdc0: a5 04     
             beq __fdc6         ; $fdc2: f0 02     
             inx                ; $fdc4: e8        
-            inx                ; $fdc5: e8        
+            inx                ; $fdc5: e8   
+			
 __fdc6:     stx vPPUController            ; $fdc6: 86 06     
             stx ppuControl          ; $fdc8: 8e 00 20  
-            lda $03            ; $fdcb: a5 03     
-            sta $2005          ; $fdcd: 8d 05 20  
+			; current bird position
+            lda vBirdPPUX            ; $fdcb: a5 03     
+            sta ppuScroll          ; $fdcd: 8d 05 20  
+			; y scroll is always zero
             lda $05            ; $fdd0: a5 05     
-            sta $2005          ; $fdd2: 8d 05 20  
+            sta ppuScroll          ; $fdd2: 8d 05 20  
             rts                ; $fdd5: 60        
 
 ;-------------------------------------------------------------------------------
@@ -7186,12 +7248,12 @@ __fdf5:     sta ppuAddress          ; $fdf5: 8d 06 20
             stx ppuAddress          ; $fdfa: 8e 06 20  
             ldy #$03           ; $fdfd: a0 03     
             lda #$24           ; $fdff: a9 24     
-__fe01:     sta $2007          ; $fe01: 8d 07 20  
+__fe01:     sta ppuData          ; $fe01: 8d 07 20  
             inx                ; $fe04: e8        
             bne __fe01         ; $fe05: d0 fa     
             dey                ; $fe07: 88        
             bne __fe01         ; $fe08: d0 f7     
-__fe0a:     sta $2007          ; $fe0a: 8d 07 20  
+__fe0a:     sta ppuData          ; $fe0a: 8d 07 20  
             inx                ; $fe0d: e8        
             cpx #$c0           ; $fe0e: e0 c0     
             bne __fe0a         ; $fe10: d0 f8     
@@ -7205,7 +7267,7 @@ __fe13:     clc                ; $fe13: 18
             sta ppuAddress          ; $fe1b: 8d 06 20  
             lda #$00           ; $fe1e: a9 00     
             tax                ; $fe20: aa        
-__fe21:     sta $2007          ; $fe21: 8d 07 20  
+__fe21:     sta ppuData          ; $fe21: 8d 07 20  
             inx                ; $fe24: e8        
             cpx #$40           ; $fe25: e0 40     
             bne __fe21         ; $fe27: d0 f8     
@@ -7251,11 +7313,13 @@ __fe64:     ldy #$3f           ; $fe64: a0 3f
             sty ppuAddress          ; $fe66: 8c 06 20  
             ldx #$00           ; $fe69: a2 00     
             stx ppuAddress          ; $fe6b: 8e 06 20  
+			
 __fe6e:     lda $30,x          ; $fe6e: b5 30     
-            sta $2007          ; $fe70: 8d 07 20  
+            sta ppuData          ; $fe70: 8d 07 20  
             inx                ; $fe73: e8        
             cpx #$20           ; $fe74: e0 20     
             bne __fe6e         ; $fe76: d0 f6     
+			
             sty ppuAddress          ; $fe78: 8c 06 20  
             lda #$00           ; $fe7b: a9 00     
             sta ppuAddress          ; $fe7d: 8d 06 20  
@@ -7273,32 +7337,43 @@ __fe89:     lda __c000,x       ; $fe89: bd 00 c0
             rts                ; $fe93: 60        
 
 ;-------------------------------------------------------------------------------
-__fe94:     ldx #$00           ; $fe94: a2 00     
+; writing f0 will hide sprite
+__hideAllSprites:     
+			ldx #$00           ; $fe94: a2 00     
             lda #$f0           ; $fe96: a9 f0     
-__fe98:     sta $0700,x        ; $fe98: 9d 00 07  
+__hideAllSpritesLoop:     
+			sta $0700,x        ; $fe98: 9d 00 07  
             inx                ; $fe9b: e8        
             inx                ; $fe9c: e8        
             inx                ; $fe9d: e8        
             inx                ; $fe9e: e8        
-            bne __fe98         ; $fe9f: d0 f7     
+            bne __hideAllSpritesLoop         ; $fe9f: d0 f7     
             rts                ; $fea1: 60        
 
 ;-------------------------------------------------------------------------------
-__fea2:     ldx #$01           ; $fea2: a2 01     
-            stx $4016          ; $fea4: 8e 16 40  
+; fills vPlayerInput and vPlayer2Input with input from joysticks
+__getControllerInput:    
+			; strobe
+			ldx #$01           ; $fea2: a2 01     
+            stx joy1port          ; $fea4: 8e 16 40  
             lda #$00           ; $fea7: a9 00     
-            sta $4016          ; $fea9: 8d 16 40  
+            sta joy1port          ; $fea9: 8d 16 40  
+			
+			; now stack all buttons in vPlayerInput and vPlayer2Input by shifting bits
             ldx #$08           ; $feac: a2 08     
-__feae:     lda $4016          ; $feae: ad 16 40  
+__inputStacking:     
+			lda joy1port          ; $feae: ad 16 40  
             and #$03           ; $feb1: 29 03     
             cmp #$01           ; $feb3: c9 01     
             ror vPlayerInput            ; $feb5: 66 0a     
-            lda $4017          ; $feb7: ad 17 40  
+            lda joy2port          ; $feb7: ad 17 40  
             and #$03           ; $feba: 29 03     
             cmp #$01           ; $febc: c9 01     
-            ror $0b            ; $febe: 66 0b     
+            ror vPlayer2Input            ; $febe: 66 0b     
             dex                ; $fec0: ca        
-            bne __feae         ; $fec1: d0 eb     
+            bne __inputStacking         ; $fec1: d0 eb  
+			
+			; advance to next game cycle
             inc vCycleCounter            ; $fec3: e6 09     
             rts                ; $fec5: 60        
 
