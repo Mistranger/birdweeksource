@@ -29,7 +29,7 @@
 ; Variables
 			; Zero-page
 			
-			; Nabletable bird currently in
+			; Nametable bird currently in
 			vBirdPPUNametable equ $02
 			; Position of bird in nametable
 			vBirdPPUX equ $03
@@ -64,6 +64,7 @@
 			vIsGameLoading equ $f6
 			vGameLoadingCounter equ $f7
 			
+			vPlayerScore equ $0100
 			
 			; 0200
 			vStageSelectState equ $02e0
@@ -213,7 +214,7 @@ __c0ac:     lda vGameState            ; $c0ac: a5 50
             cmp #$fc           ; $c0ae: c9 fc     
             beq __c068         ; $c0b0: f0 b6     
             jsr __c309         ; $c0b2: 20 09 c3  
-            jsr __ca91         ; $c0b5: 20 91 ca  
+            jsr __drawPlayerScore         ; $c0b5: 20 91 ca  
             jsr __f618         ; $c0b8: 20 18 f6  
             jsr __f5e8         ; $c0bb: 20 e8 f5  
             jsr __c2b6         ; $c0be: 20 b6 c2  
@@ -1553,7 +1554,7 @@ __ca4a:     ldx #$00           ; $ca4a: a2 00
             sta ppuAddress          ; $ca4e: 8d 06 20  
             lda #$c8           ; $ca51: a9 c8     
             sta ppuAddress          ; $ca53: 8d 06 20  
-__ca56:     lda __ca8c,x       ; $ca56: bd 8c ca  
+__ca56:     lda __scoreLabel,x       ; $ca56: bd 8c ca  
             sta ppuData          ; $ca59: 8d 07 20  
             inx                ; $ca5c: e8        
             cpx #$05           ; $ca5d: e0 05     
@@ -1563,7 +1564,7 @@ __ca56:     lda __ca8c,x       ; $ca56: bd 8c ca
             lda #$d0           ; $ca66: a9 d0     
             sta ppuAddress          ; $ca68: 8d 06 20  
 __ca6b:     ldx #$07           ; $ca6b: a2 07     
-__ca6d:     lda $0100,x        ; $ca6d: bd 00 01  
+__ca6d:     lda vPlayerScore,x        ; $ca6d: bd 00 01  
             bne __ca80         ; $ca70: d0 0e     
             lda #$24           ; $ca72: a9 24     
             sta ppuData          ; $ca74: 8d 07 20  
@@ -1574,18 +1575,21 @@ __ca7a:     lda #$00           ; $ca7a: a9 00
 __ca7f:     rts                ; $ca7f: 60        
 
 ;-------------------------------------------------------------------------------
-__ca80:     lda $0100,x        ; $ca80: bd 00 01  
+__ca80:     lda vPlayerScore,x        ; $ca80: bd 00 01  
             sta ppuData          ; $ca83: 8d 07 20  
             dex                ; $ca86: ca        
             bne __ca80         ; $ca87: d0 f7     
             jmp __ca7a         ; $ca89: 4c 7a ca  
 
 ;-------------------------------------------------------------------------------
-__ca8c:     .hex 1c 0c 18 1b   ; $ca8c: 1c 0c 18 1b   Data
+__scoreLabel:     
+			.hex 1c 0c 18 1b   ; $ca8c: 1c 0c 18 1b   Data
             .hex 0e            ; $ca90: 0e            Data
 
 ;-------------------------------------------------------------------------------
-__ca91:     jsr __levelModulo4         ; $ca91: 20 5e c3  
+__drawPlayerScore:     
+			; don't draw score if in bonus level
+			jsr __levelModulo4         ; $ca91: 20 5e c3  
             cpx #$03           ; $ca94: e0 03     
             beq __ca7f         ; $ca96: f0 e7     
             ldx #$00           ; $ca98: a2 00     
@@ -1593,10 +1597,11 @@ __ca91:     jsr __levelModulo4         ; $ca91: 20 5e c3
             sta ppuAddress          ; $ca9c: 8d 06 20  
             lda #$69           ; $ca9f: a9 69     
             sta ppuAddress          ; $caa1: 8d 06 20  
-__caa4:     lda __ca8c,x       ; $caa4: bd 8c ca  
+__caa4:     lda __scoreLabel,x       ; $caa4: bd 8c ca  
             sta ppuData          ; $caa7: 8d 07 20  
             inx                ; $caaa: e8        
-            cpx #$05           ; $caab: e0 05     
+            cpx #$05           ; $caab: e0 05  
+			
             bne __caa4         ; $caad: d0 f5     
             lda #$20           ; $caaf: a9 20     
             sta ppuAddress          ; $cab1: 8d 06 20  
@@ -1727,6 +1732,7 @@ __cb63:     jmp __cbea         ; $cb63: 4c ea cb
 __handleMainMenuDemo:     
 			lda vMainMenuCounter            ; $cb66: a5 57     
             cmp #$20           ; $cb68: c9 20     
+			
             beq __initGameDemo         ; $cb6a: f0 f4     
             bcs __cb63         ; $cb6c: b0 f5     
             jsr __mainMenuHandleStart         ; $cb6e: 20 2c c2  
@@ -4361,9 +4367,9 @@ ___initGame:
             lda #$09           ; $e166: a9 09     
             ldx #$20           ; $e168: a2 20     
             jsr __e2b6         ; $e16a: 20 b6 e2  
-            jsr __e18a         ; $e16d: 20 8a e1  
+            jsr __drawMainMenuLabels         ; $e16d: 20 8a e1  
             jsr __e231         ; $e170: 20 31 e2  
-            jsr __e1fc         ; $e173: 20 fc e1  
+            jsr __drawHiScoreLabel         ; $e173: 20 fc e1  
             jsr __hideAllSprites         ; $e176: 20 94 fe  
             jsr __e25a         ; $e179: 20 5a e2  
             jsr __e265         ; $e17c: 20 65 e2  
@@ -4373,46 +4379,54 @@ ___initGame:
             jmp __enableNMI         ; $e187: 4c c6 fe  
 
 ;-------------------------------------------------------------------------------
-__e18a:     ldx #$00           ; $e18a: a2 00     
+__drawMainMenuLabels:    
+			; draw "study mode"
+			ldx #$00           ; $e18a: a2 00     
             lda #$22           ; $e18c: a9 22     
             sta ppuAddress          ; $e18e: 8d 06 20  
             lda #$cd           ; $e191: a9 cd     
             sta ppuAddress          ; $e193: 8d 06 20  
-__e196:     lda __e1d0,x       ; $e196: bd d0 e1  
+__e196:     lda __studyModeLabel,x       ; $e196: bd d0 e1  
             sta ppuData          ; $e199: 8d 07 20  
             inx                ; $e19c: e8        
             cpx #$0a           ; $e19d: e0 0a     
             bne __e196         ; $e19f: d0 f5     
+			; draw "game start"
             ldx #$00           ; $e1a1: a2 00     
             lda #$22           ; $e1a3: a9 22     
             sta ppuAddress          ; $e1a5: 8d 06 20  
             lda #$8d           ; $e1a8: a9 8d     
             sta ppuAddress          ; $e1aa: 8d 06 20  
-__e1ad:     lda __e1da,x       ; $e1ad: bd da e1  
+__e1ad:     lda __gameStartLabel,x       ; $e1ad: bd da e1  
             sta ppuData          ; $e1b0: 8d 07 20  
             inx                ; $e1b3: e8        
             cpx #$0a           ; $e1b4: e0 0a     
             bne __e1ad         ; $e1b6: d0 f5     
+			; draw copyright
             ldx #$00           ; $e1b8: a2 00     
             lda #$23           ; $e1ba: a9 23     
             sta ppuAddress          ; $e1bc: 8d 06 20  
             lda #$24           ; $e1bf: a9 24     
             sta ppuAddress          ; $e1c1: 8d 06 20  
-__e1c4:     lda __e1e4,x       ; $e1c4: bd e4 e1  
+__e1c4:     lda __copyrightLabel,x       ; $e1c4: bd e4 e1  
             sta ppuData          ; $e1c7: 8d 07 20  
             inx                ; $e1ca: e8        
             cpx #$18           ; $e1cb: e0 18     
             bne __e1c4         ; $e1cd: d0 f5     
+			
             rts                ; $e1cf: 60        
 
 ;-------------------------------------------------------------------------------
-__e1d0:     .hex 1c 1d 1e 0d   ; $e1d0: 1c 1d 1e 0d   Data
+__studyModeLabel:     
+			.hex 1c 1d 1e 0d   ; $e1d0: 1c 1d 1e 0d   Data
             .hex 22 24 10 0a   ; $e1d4: 22 24 10 0a   Data
             .hex 16 0e         ; $e1d8: 16 0e         Data
-__e1da:     .hex 10 0a 16 0e   ; $e1da: 10 0a 16 0e   Data
+__gameStartLabel:     
+			.hex 10 0a 16 0e   ; $e1da: 10 0a 16 0e   Data
             .hex 24 1c 1d 0a   ; $e1de: 24 1c 1d 0a   Data
             .hex 1b 1d         ; $e1e2: 1b 1d         Data
-__e1e4:     .hex 25 24 01 09   ; $e1e4: 25 24 01 09   Data
+__copyrightLabel:     
+			.hex 25 24 01 09   ; $e1e4: 25 24 01 09   Data
             .hex 08 06 24 1d   ; $e1e8: 08 06 24 1d   Data
             .hex 18 1c 11 12   ; $e1ec: 18 1c 11 12   Data
             .hex 0b 0a 24 0e   ; $e1f0: 0b 0a 24 0e   Data
@@ -4420,16 +4434,18 @@ __e1e4:     .hex 25 24 01 09   ; $e1e4: 25 24 01 09   Data
             .hex 0e 17 0a 1b   ; $e1f8: 0e 17 0a 1b   Data
 
 ;-------------------------------------------------------------------------------
-__e1fc:     lda #$20           ; $e1fc: a9 20     
+__drawHiScoreLabel:     
+			lda #$20           ; $e1fc: a9 20     
             sta ppuAddress          ; $e1fe: 8d 06 20  
             lda #$68           ; $e201: a9 68     
             sta ppuAddress          ; $e203: 8d 06 20  
             ldy #$00           ; $e206: a0 00     
-__e208:     lda __e275,y       ; $e208: b9 75 e2  
+__e208:     lda __hiScoreLabel,y       ; $e208: b9 75 e2  
             sta ppuData          ; $e20b: 8d 07 20  
             iny                ; $e20e: c8        
             cpy #$07           ; $e20f: c0 07     
             bne __e208         ; $e211: d0 f5     
+			
 __e213:     lda $0110,y        ; $e213: b9 10 01  
             bne __e226         ; $e216: d0 0e     
             lda #$24           ; $e218: a9 24     
@@ -4484,7 +4500,8 @@ __e265:     lda #$34           ; $e265: a9 34
             rts                ; $e274: 60        
 
 ;-------------------------------------------------------------------------------
-__e275:     .hex 11 12 1c 0c   ; $e275: 11 12 1c 0c   Data
+__hiScoreLabel:     
+			.hex 11 12 1c 0c   ; $e275: 11 12 1c 0c   Data
             .hex 18 1b 0e      ; $e279: 18 1b 0e      Data
 
 ;-------------------------------------------------------------------------------
@@ -6398,15 +6415,15 @@ __f570:     lda vStageSelectState          ; $f570: ad e0 02
             bne __f595         ; $f573: d0 20     
             ldx #$08           ; $f575: a2 08     
 __f577:     lda $0110,x        ; $f577: bd 10 01  
-            cmp $0100,x        ; $f57a: dd 00 01  
+            cmp vPlayerScore,x        ; $f57a: dd 00 01  
             bne __f584         ; $f57d: d0 05     
             dex                ; $f57f: ca        
             beq __f595         ; $f580: f0 13     
             bne __f577         ; $f582: d0 f3     
 __f584:     lda $0110,x        ; $f584: bd 10 01  
-            cmp $0100,x        ; $f587: dd 00 01  
+            cmp vPlayerScore,x        ; $f587: dd 00 01  
             bcs __f595         ; $f58a: b0 09     
-__f58c:     lda $0100,x        ; $f58c: bd 00 01  
+__f58c:     lda vPlayerScore,x        ; $f58c: bd 00 01  
             sta $0110,x        ; $f58f: 9d 10 01  
             dex                ; $f592: ca        
             bne __f58c         ; $f593: d0 f7     
@@ -6415,7 +6432,7 @@ __f595:     rts                ; $f595: 60
 ;-------------------------------------------------------------------------------
 __f596:     ldx #$00           ; $f596: a2 00     
             txa                ; $f598: 8a        
-__f599:     sta $0100,x        ; $f599: 9d 00 01  
+__f599:     sta vPlayerScore,x        ; $f599: 9d 00 01  
             inx                ; $f59c: e8        
             cpx #$08           ; $f59d: e0 08     
             bne __f599         ; $f59f: d0 f8     
@@ -7296,7 +7313,7 @@ __fe3c:     lda $0130,x        ; $fe3c: bd 30 01
 ;-------------------------------------------------------------------------------
 __fe4a:     ldx #$00           ; $fe4a: a2 00     
             txa                ; $fe4c: 8a        
-__fe4d:     sta $0100,x        ; $fe4d: 9d 00 01  
+__fe4d:     sta vPlayerScore,x        ; $fe4d: 9d 00 01  
             inx                ; $fe50: e8        
             bne __fe4d         ; $fe51: d0 fa     
 __fe53:     lda __c020,x       ; $fe53: bd 20 c0  
@@ -7430,14 +7447,14 @@ __fefa:     ldx #$01           ; $fefa: a2 01
             cmp #$0a           ; $ff02: c9 0a     
             bne __ff11         ; $ff04: d0 0b     
             lda #$00           ; $ff06: a9 00     
-            sta $0100,x        ; $ff08: 9d 00 01  
+            sta vPlayerScore,x        ; $ff08: 9d 00 01  
             inx                ; $ff0b: e8        
             cpx #$08           ; $ff0c: e0 08     
             bne __ff21         ; $ff0e: d0 11     
             rts                ; $ff10: 60        
 
 ;-------------------------------------------------------------------------------
-__ff11:     sta $0100,x        ; $ff11: 9d 00 01  
+__ff11:     sta vPlayerScore,x        ; $ff11: 9d 00 01  
             rts                ; $ff14: 60        
 
 ;-------------------------------------------------------------------------------
@@ -7452,13 +7469,13 @@ __ff1a:     ldx #$03           ; $ff1a: a2 03
             ldx #$01           ; $ff1f: a2 01     
 __ff21:     lda vPlayMainMenuMusic          ; $ff21: ad 73 02  
             bne __ff3a         ; $ff24: d0 14     
-            lda $0100,x        ; $ff26: bd 00 01  
+            lda vPlayerScore,x        ; $ff26: bd 00 01  
             clc                ; $ff29: 18        
             adc #$01           ; $ff2a: 69 01     
             cmp #$0a           ; $ff2c: c9 0a     
             bne __ff11         ; $ff2e: d0 e1     
             lda #$00           ; $ff30: a9 00     
-            sta $0100,x        ; $ff32: 9d 00 01  
+            sta vPlayerScore,x        ; $ff32: 9d 00 01  
             inx                ; $ff35: e8        
             cpx #$08           ; $ff36: e0 08     
             bne __ff21         ; $ff38: d0 e7     
