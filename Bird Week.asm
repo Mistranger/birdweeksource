@@ -1,5 +1,6 @@
 ;-------------------------------------------------------------------------------
 ; Bird Week (J) [!].nes disasembled by DISASM6 v1.5
+
 ; Further disassembling, label naming, comments and other stuff by cybermind
 ;-------------------------------------------------------------------------------
 
@@ -36,75 +37,122 @@
 			vBirdPPUNametable equ $02
 			; Position of bird in nametable
 			vBirdPPUX equ $03
+			; PPU scrolling RAM mirrors (not used)
 			vPPUScrollX equ $04
 			vPPUScrollY equ $05
+			; RAM mirror of PPU controller register
 			vPPUController equ $06
+			; RAM mirror of PPU mask register
 			vPPUMask equ $07
+			; Random variable, increments by 3 in forever loop
 			vRandomVar equ $08
+			; Game cycle counter
 			vCycleCounter equ $09
+			; Player input variable (format is described above)
 			vPlayerInput equ $0a
+			; not used
 			vPlayer2Input equ $0b
+			; What gets drawn on left upper corner of screen
 			vNestlingCountLabel equ $0f
 			vNestlingOnes equ $10
 			vNestling10s equ $11
 			vNestling100s equ $12
+			; Another random variable, increments by 1 in forever loop
 			vRandomVar2 equ $17
+			; these are used to build background images
 			vTileXOffset equ $1c
 			vTileYOffset equ $1d
 			vTileAddress equ $1e
 			vTileAddressHi equ $1f
+			; Music state, 00 - stopped, FF - playing, writing other numbers here will play a music track
 			vMusicPlayerState equ $20
+			; Address of music data
 			vMusicAddr equ $21
 			vMusicAddrHi equ $22
+			; As it says
 			vMusicSpeed equ $23
+			; What we load in APU length counter load registers
 			vPulseLengthCounterLoad equ $24
+			; music note length counter
 			vMusicCounter equ $25
+			; which note to play
 			vMusicNote equ $26
+			; used for repeating patterns of music
 			vMusicOldAddr equ $27
 			vMusicOldAddrHi equ $28
 			vMusicRepeatPrevPattern equ $29
+			; sound player state (same as music player)
 			vSoundPlayerState equ $2a
+			; sound data address
 			vSoundAddr equ $2b
 			vSoundHiAddr equ $2c
+			; sound speed
 			vSoundSpeed equ $2d
+			; triangle counter load to write in APU register
 			vTriangleLengthCounterLoad equ $2e
+			; note counter used for sounds
 			vSoundCounter equ $2f
+			
+			; array of 0x20 bytes, first 0x10 for background palettes, next 0x10 are for sprite palettes
 			vPaletteData equ $30
+			; current game state (menu, game loop, game over, ...)
 			vGameState equ $50
-			;vIsSelectPressed equ $51
+			; universal counter variable
 			vCounter equ $51
 			; even values are "game start", odd values are "study mode" 
 			vGameMode equ $52
+			; universal data pointer
 			vDataAddress equ $53
 			vDataAddressHi equ $54
+			; this counts bonus levels as well
 			vCurrentLevel equ $55
+			; you wish that game could give you more of these
 			vBirdLives equ $56
+			; timer for main menu to start demo sequence
 			vMainMenuCounter equ $57
+			; state of woodpecker (on tree, in flight)
 			vWoodpeckerState equ $58
+			; counter for dead woodpecker to control revival
 			vWoodpeckerDeadTimer equ $59
+			; bird is heading right
 			vBirdIsRight equ $5a
+			; X coord in game world
 			vBirdX equ $5b
+			; offset between nametable 0 and the bird, also used for 2-actor direction "vector" calculation
 			vBirdOffsetX equ $5c
+			; 0-left, 1-right,2-down,3-up,4-freefall
 			vBirdDirection equ $5d
+			; used to calculate some effects while game is in frozen state
 			vGameIsFrozen equ $5e
+			; how much nestlings you have fed in current round
 			vRisedNestlingCount equ $5f
+			; this is true when bird hits top of the screen
 			vBirdHitsTop equ $60
+			; no comment
 			vIsBirdLanded equ $61
+			; when bird flaps its wings before landing
 			vIsBirdLanding equ $62
+			; how much nestlings you need to feed in current round
 			vNestlingMaxFeed equ $64
+			; state of nestling which currently flies away
 			vNestlingAwayState equ $65
+			; we hit bee somehow
 			vBeeIsHit equ $66
 			; when kite revives after death, it rises until its altitude will become #$80
 			vKiteRiseAfterDeath equ $67
+			; kite changes its altitude by small amounts, these 2 variables control the change
 			vKiteYChange equ $68
 			vKiteMaxYChange equ $69
 			; 1 - left, 0 - right
 			vKiteDirection equ $6a
+			; kite speed ups eventually in rounds, these 2 variables control the speed up
 			vKiteSpeedTimer equ $6b
 			vKiteSpeed equ $6c
+			; kite lying dead counter
 			vKiteDeadTimer equ $6e
+			; what it says
 			vIsGamePaused equ $6f
-			; X coordinates of game actors 
+			; array of X coordinates of game actors 
 			vActorX equ $70
 			vBestEndingBirdX equ $70
 			vBeeX equ $70
@@ -125,11 +173,17 @@
 			vHawkX equ $80
 			vFlowerX equ $81
 			vSnailX equ $82
+			; we hit kite somehow
 			vKiteHit equ $86
+			; we hit woodpecker/squirrel
 			vWoodpeckerSquirrelIsHit equ $88
+			; state of creature, that gives temporal invulerability (falling, running away)
 			vInvulnCreatureState equ $89
+			; we hit hawk
 			vHawkIsHit equ $8a
+			; how much bonus items are caught
 			vBonusItemsCaught equ $8b
+			; array of nestling states (how much they are fed)
 			vNestlingStates equ $008c
 			vNestling1State equ $8c
 			vNestling2State equ $8d
@@ -153,15 +207,20 @@
 			vHawkY equ $a0
 			vFlowerY equ $a1
 			vSnailY equ $a2
-			
+			; nestling is rising at the sky
 			vNestlingIsRising equ $a4
+			; snail's time before it disappears
 			vSnailTimer equ $a5
+			; time freeze counter
 			vTimeFreezeTimer equ $a6
 			vTimeFreezeTimerAbs equ $00a6
+			; lying dead fox timer
 			vFoxDeadTimer equ $a7
+			; we hit fox
 			vFoxIsHit equ $a8
+			; bird is currently safe and cannot be hit
 			vBirdOnBranch equ $ab
-			; object hit flags
+			; object collision check flags
 			vObjectHitFlags equ $b0
 			vBeeHit equ $b0
 			; this is true when nestlings are moving from right ot left in best ending scene
@@ -179,40 +238,64 @@
 			vHawkHit equ $c0
 			vFlowerHit equ $c1
 			vSnailHit equ $c2
+			
+			; lying dead hawk timer
 			vHawkDeadCounter equ $c5
+			; whether it dives or rises up to the sky
 			vHawkState equ $c6
+			; what it says
 			vIsStartPressed equ $d0
+			; this is used for pause screen
 			vStartPressedCount equ $d1
+			; bird falls or fallen already
 			vBirdFallState equ $d2
+			; score/bonus/delay state on score screen
 			vScoreScreenState equ $d3
+			; used to time "next round" screen
 			vScoreScreenCounter equ $d4
+			; this controls butterfly animation and movement
 			vButterfly1Timer equ $d6
 			vButterfly2Timer equ $d7
 			vButterfly3Timer equ $d8
 			vButterfly4Timer equ $d9
 			vButterflyFrameTimer equ $da
+			; now it's time to hit it!
 			vIsMoleOnSurface equ $de
+			; mole is crying timer
 			vMoleDeadCounter equ $df
+			; mole laughs at player timer
 			vMoleOnSurfaceTimer equ $e0
+			; we hold mushroom
 			vMushroomEngaged equ $e7
+			; used to control nestling rising animation
 			vNestlingHappyTimer equ $e8
+			; true when nestling dies
 			vNestlingIsDead equ $e9
+			; we hold butterfly
 			vButterflyIsCaught equ $ea
+			; we hit the mole and it starts to cry
 			vMoleIsDying equ $eb
+			; used to control bonus level time
 			vBonusLevelTimer equ $ec
 			; when music on bonus score screen ends, this variable will count a delay before next level
 			vBonusScoreScreenCounter equ $f1
+			; array used to display current level number
 			vRoundNumberArray equ $f1
 			vRoundNumber equ $f2
+			; game is currently loading
 			vIsGameLoading equ $f6
+			; used to time loading
 			vGameLoadingCounter equ $f7
 			
-		; 0100
+		; 0100 - player score and program stack
+			; array that holds current player score (every decimal number kept in single byte)
 			vPlayerScore equ $0100
+			; same, but for high score
 			vHiPlayerScore equ $0110
 			
-		; 0200
+		; 0200 - additional variables
 			vPage200 equ $0200
+			; used for butterfly animation
 			vButterflyFrames equ $0200
 			vNestling1Timer equ $0205
 			vNestling2Timer equ $0206
@@ -224,54 +307,77 @@
 			vFoxMushroomDead equ $0212
 			vHawkMushroomDead equ $0213
 			vWoodpeckerMushroomDead equ $0214
+			
+			; we hit big bee
 			vBigBeeDead equ $0215
+			; bird is drowning on sea bonus level
 			vBirdDrownTimer equ $0227
+			; these controls bonus score given for fast nestling feeding
 			vNestling3000Bonus equ $0228
 			vNestling2000Bonus equ $0229
 			vNestling1000Bonus equ $022a
 			; when a near dying nestling is fed, you won't get bonus score
 			vIsNestlingNoBonus equ $022b
+			; flag to control extra life achievement
 			vGotExtraLife equ $0230
 			; give 1000 pts for collecting >=10 bonus items
 			vBonusLevelExtraScore equ $0250
+			; strange counter used to control whale spawning
 			vWhaleCounter equ $0252
+			; we took the caterpillar bonus
 			vCaterpillarTaken equ $0253
+			; caterpillar is in game world
 			vCaterpillarSpawned equ $0254
+			; bee is turned to left
 			vBeeRotateLeft equ $0255
+			; used to control bee animation and movement
 			vBeeFrameCounter equ $0256
 			vBeeFrameTimer equ $0257
+			; used to control score given for kiling creatues
 			vScoreForDeadWoodpecker equ $025a
 			vScoreForDeadKite equ $025b
+			; bee is dead counter
 			vDeadBeeTimer equ $025d
+			; squirrel flags (in flight, on tree)
 			vSquirrelFlags equ $0261
+			; current input delay on demo sequence screen  
 			vDemoPlayerInputDelay equ $0271
+			; current input processed on demo sequence screen
 			vDemoPlayerInput equ $0272
+			; is demo playing
 			vDemoSequenceActive equ $0273
 			; bonus level internally lasts for 2 time loops, with main counter on $ec
 			vBonusLevel2Loop equ $0274
+			; used to control fox jumping
 			vFoxJumpFrame equ $0290
+			; and its animation
 			vFoxFrameTimer equ $0291
+			; same for big bee
 			vBigBeeFrameCounter equ $0292
 			vBigBeeTimer equ $0293
+			; we killed big bee
 			vBigBeeIsDead equ $0294
 			; these 3 share same variable
-			vDeadBigBeeCounter equ $0295
-			vSnailIsLeft equ $0295
-			vStartBestEnding equ $0295
+			vDeadBigBeeCounter equ $0295  ; counter for dead big bee
+			vSnailIsLeft equ $0295        ; if snail is heading left
+			vStartBestEnding equ $0295    ; used to control best ending
 			; when you kill with mushroom, it will respawn after 0x200 cycles
 			vMushroomRecoverTimer equ $0296
 			; sky changes color on best ending
 			vBestEndingSkyCounter equ $02c1
+			; flowers are opening on best ending
 			vBestEndingFlowerCounter equ $02c2
+			; playing in study mode
 			vIsStudyMode equ $02e0
+			; in study mode, used to hold level number player chose to play
 			vStageSelect10s equ $02e1
 			vStageSelectOnes equ $02e2
 			; when you kill hawk or big bee, this will count and then game will spawn invuln creature
 			vInvulnSpawnTimer equ $02e4
 			
-		; 0300
+		; 0300 - used for building macro tiles (32x32 pixels)
 			vBonusItemCounter equ $0310
-		; 0600 - OAM table
+		; 0600 - OAM copy in RAM, used for DMA upload
 			vOAMTable equ $0600
 			vOAMPosY equ $0604
 			vOAMTileIndex equ $0605
@@ -279,7 +385,7 @@
 			vOAMPosX equ $0607
 			
 		; 0700
-			; sptite table, same as OAM table, but uses own internal sprite numbers, which later converted to OAM format
+			; sptite table, same as OAM table, but uses its own internal sprite numbers, which are later converted to OAM format
 			vSpriteTable equ $0700
 			vBirdSpritePosY equ $0700
 			vWoodPeckerSprite equ $073d
@@ -381,7 +487,7 @@ __processGameState:
             cmp #$fb           																		; $c057: c9 fb     
 				beq __studyModeStageSelectLoop         																		; $c059: f0 13    
 			
-			; are you done playing?
+			; have you done playing?
             rts                																		; $c05b: 60        
 
 ;-------------------------------------------------------------------------------
@@ -932,14 +1038,14 @@ __updateNestlingState:
 			jsr __setPPUAddressFromData         																		; $c36d: 20 04 c4  
             lda vNestling1Timer,y        																		; $c370: b9 05 02  
             cmp #$40           																		; $c373: c9 40     
-            bcc __setNestlingFed         																		; $c375: 90 33     
+				bcc __setNestlingFed         																		; $c375: 90 33     
             cmp #$a0           																		; $c377: c9 a0     
-            bcc __setNestlingSlightlyHungry         																		; $c379: 90 0a     
+				bcc __setNestlingSlightlyHungry         																		; $c379: 90 0a     
             cmp #$e0           																		; $c37b: c9 e0     
-            bcc __setNestlingHungry         																		; $c37d: 90 25     
+				bcc __setNestlingHungry         																		; $c37d: 90 25     
             cmp #$f0           																		; $c37f: c9 f0     
-            bcc __setNestlingDying1         																		; $c381: 90 31     
-            bcs __setNestlingDying2         																		; $c383: b0 2a     
+				bcc __setNestlingDying1         																		; $c381: 90 31     
+				bcs __setNestlingDying2         																		; $c383: b0 2a     
 __setNestlingSlightlyHungry:     
 			jsr __setXEvery8Cycle         																		; $c385: 20 8b d0  
 __updateNestlingFrame:     
